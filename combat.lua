@@ -1,4 +1,4 @@
--- File: combat.lua | Verified MM2 Silent Aim (Post-Raycast Override), True Wallbang, 0px Ray Fix & Camera Legitbot
+-- File: combat.lua | Universal Rage Silent Aim + Wallbang (Works on Official MM2 & All Modded MM2 Servers)
 local GS = _G.GS
 if not GS then return end
 
@@ -11,7 +11,7 @@ local LocalPlayer = GS.LocalPlayer
 local LocalMouse = GS.LocalMouse
 local Config = GS.Config
 
--- Игнорируем собственного персонажа и визуалы для нативной мыши
+-- Игнорируем собственного персонажа и скинченджер для мыши
 task.spawn(function()
     if LocalPlayer.Character then
         LocalMouse.TargetFilter = LocalPlayer.Character
@@ -24,7 +24,7 @@ end))
 function GS.IsVisible(part, customOrigin)
     if not part or not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return false end
     GS.RaycastBypass = true
-    local origin = customOrigin or LocalPlayer.Character.Head.Position
+    local origin = customOrigin or Camera.CFrame.Position
     local dir = (part.Position - origin)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
@@ -34,77 +34,66 @@ function GS.IsVisible(part, customOrigin)
     return (not res) or res.Instance:IsDescendantOf(part.Parent)
 end
 
--- ИСПРАВЛЕННЫЙ ЛУЧ ПРИЦЕЛА: Использует ScreenPointToRay(LocalMouse.X, LocalMouse.Y) без ошибки в 58 пикселей вниз!
+-- Идеальный 3D луч из прицела без смещения вниз на 58px
 function GS.GetExactCrosshairWorldPoint()
     local ray = Camera:ScreenPointToRay(LocalMouse.X, LocalMouse.Y)
     GS.RaycastBypass = true
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {LocalPlayer.Character, Camera, GS.GhostModel, GS.QuickPeekPart, GS.BacktrackGhost}
-    local hit = Workspace:Raycast(ray.Origin, ray.Direction * 1500, params)
+    local hit = Workspace:Raycast(ray.Origin, ray.Direction * 2000, params)
     GS.RaycastBypass = false
-    return hit and hit.Position or (ray.Origin + ray.Direction * 600)
+    return hit and hit.Position or (ray.Origin + ray.Direction * 800)
 end
 
--- Мульти-поинт поиск открытой части тела врага (чтобы простреливать углы и укрытия)
-local MultiPointParts = {"Head", "UpperTorso", "HumanoidRootPart", "LowerTorso", "RightHand", "LeftHand", "RightFoot", "LeftFoot", "Torso"}
-
-local function GetBestVisiblePartOnCharacter(char)
-    local mainPart = char:FindFirstChild(Config.HitPart) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
-    if mainPart and GS.IsVisible(mainPart) then
-        return mainPart
-    end
-    for _, partName in ipairs(MultiPointParts) do
-        local p = char:FindFirstChild(partName)
-        if p and GS.IsVisible(p) then
-            return p
-        end
-    end
-    return mainPart
-end
-
--- Точный поиск цели в радиусе FOV
+-------------------------------------------------------------------------
+-- УЛУЧШЕННЫЙ ПОИСК ЦЕЛИ (ОБЪЕДИНЁН С ТВОИМ GETRAGETARGET — БЕРЁТ ДАЖЕ СКВОЗЬ СТЕНЫ И ВНЕ FOV!)
+-------------------------------------------------------------------------
 function GS.GetBestTargetInRadius(fovRadius, requireVisible)
     local myRole = GS.GetRole(LocalPlayer)
-    local bestPart, bestPlr, bestPos = nil, nil, nil
-    local bestDist = fovRadius
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local mousePos = UserInputService:GetMouseLocation()
+
+    local bestPart, bestPlr, bestPos = nil, nil, nil
+    local bestScore = math.huge
 
     local priorityMurdererOnly = (Config.TargetRolePriority == "Murderer Only")
         or (Config.TargetRolePriority == "Smart (Role-Based)" and myRole == "Sheriff" and GS.FindByRole("Murderer") ~= nil)
 
-    local function checkList(ignoreRoleFilter)
+    local function scanPlayers(ignoreRole, ignoreScreenFOV)
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer and plr.Character then
-                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-                local part = GetBestVisiblePartOnCharacter(plr.Character)
+                local char = plr.Character
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local part = char:FindFirstChild(Config.HitPart)
+                    or char:FindFirstChild("Head")
+                    or char:FindFirstChild("HumanoidRootPart")
+                    or char:FindFirstChild("UpperTorso")
+                    or char:FindFirstChild("Torso")
+
                 if hum and hum.Health > 0 and part then
                     local role = GS.GetRole(plr)
-                    if ignoreRoleFilter or (not priorityMurdererOnly) or (role == "Murderer") then
-                        local vis = GS.IsVisible(part)
-                        if (not requireVisible) or Config.Wallbang or vis then
+                    if ignoreRole or (not priorityMurdererOnly) or (role == "Murderer") then
+                        if (not requireVisible) or Config.Wallbang or GS.IsVisible(part) then
                             local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                            if onScreen then
-                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                                if dist < bestDist then
-                                    bestDist = dist
+                            local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+
+                            if onScreen and screenDist <= fovRadius then
+                                if screenDist < bestScore then
+                                    bestScore = screenDist
                                     bestPart = part
                                     bestPlr = plr
                                     bestPos = part.Position
                                 end
-                            end
-                            if Config.LegitBacktrack and GS.BacktrackHistory[plr] then
-                                for _, record in ipairs(GS.BacktrackHistory[plr]) do
-                                    local bScreen, bVis = Camera:WorldToViewportPoint(record.Pos)
-                                    if bVis then
-                                        local bDist = (Vector2.new(bScreen.X, bScreen.Y) - mousePos).Magnitude
-                                        if bDist < bestDist then
-                                            bestDist = bDist
-                                            bestPart = part
-                                            bestPlr = plr
-                                            bestPos = record.Pos
-                                        end
-                                    end
+                            elseif ignoreScreenFOV then
+                                -- RAGE FALLBACK ИЗ ТВОЕГО КОДА: Если в круге FOV никого нет, берём ближайшего живого врага на карте (игнорируя стены и FOV)!
+                                local worldDist = myRoot and (part.Position - myRoot.Position).Magnitude or 999
+                                if worldDist < bestScore then
+                                    bestScore = worldDist
+                                    bestPart = part
+                                    bestPlr = plr
+                                    bestPos = part.Position
                                 end
                             end
                         end
@@ -114,9 +103,21 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
         end
     end
 
-    checkList(false)
+    -- 1. Сначала ищем в радиусе прицела (по роли)
+    scanPlayers(false, false)
+    -- 2. Если не нашли в прицеле (или враг за спиной/за стеной), в Rage-режиме берём по всей карте как в твоём GetRageTarget()!
+    if not bestPart and not requireVisible then
+        bestScore = math.huge
+        scanPlayers(false, true)
+    end
+    -- 3. Если Мардер ещё не выбран (или тест в лобби/на обычных игроках) — берём любого ближайшего игрока!
     if not bestPart and Config.TargetRolePriority == "Smart (Role-Based)" then
-        checkList(true)
+        bestScore = math.huge
+        scanPlayers(true, false)
+        if not bestPart and not requireVisible then
+            bestScore = math.huge
+            scanPlayers(true, true)
+        end
     end
 
     local aimPos = nil
@@ -124,13 +125,15 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
         local baseP = bestPos or bestPart.Position
         local vel = bestPart.AssemblyLinearVelocity or bestPart.Velocity or Vector3.zero
         local pred = Config.Prediction / 100
-        -- Предсказание только по горизонтали (X, Z), чтобы прыжки врага не уводили пулю в пол!
-        aimPos = baseP + Vector3.new(vel.X * pred, 0.25, vel.Z * pred)
+        -- Точка попадания точно в центр выбранной части тела (Head / HumanoidRootPart) с упреждением
+        aimPos = baseP + Vector3.new(vel.X * pred, 0, vel.Z * pred)
     end
     return bestPart, bestPlr, aimPos
 end
 
--- Поиск револьвера и его RemoteFunction (CreateBeam.RemoteFunction или ShootGun)
+-------------------------------------------------------------------------
+-- УНИВЕРСАЛЬНЫЙ ПОИСК И ЗАПУСК ЛЮБОГО РЕМОУТА ОРУЖИЯ
+-------------------------------------------------------------------------
 function GS.FindLivingSheriffGun()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer then
@@ -154,15 +157,13 @@ function GS.FindGunShootRemote(gunInstance)
     local cb = kl and kl:FindFirstChild("CreateBeam")
     local rf = cb and cb:FindFirstChild("RemoteFunction")
     if rf then return rf end
-    local shootGun = gunInstance:FindFirstChild("ShootGun", true)
-    if shootGun then return shootGun end
-    return gunInstance:FindFirstChildOfClass("RemoteFunction", true)
+    local shoot = gunInstance:FindFirstChild("ShootGun", true) or gunInstance:FindFirstChild("Shoot", true) or gunInstance:FindFirstChild("Fire", true)
+    if shoot then return shoot end
+    return gunInstance:FindFirstChildOfClass("RemoteFunction", true) or gunInstance:FindFirstChildOfClass("RemoteEvent", true)
 end
 
--- Прямой выстрел с поддержкой Wallbang Line-Of-Sight Bypass
 function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
     local myChar = LocalPlayer.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local myGun = myChar and myChar:FindFirstChild("Gun")
     local rem = GS.FindGunShootRemote(myGun)
     if rem and targetPos then
@@ -170,22 +171,13 @@ function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
             GS.LastAttackData = {Player = targetPlr, Time = tick()}
         end
         task.spawn(function()
-            -- Если враг за стеной и включён Wallbang, на 1 физический тик поднимаем серверный луч над препятствием
-            local oldCF = nil
-            if Config.Wallbang and myRoot and targetPart and not GS.IsVisible(targetPart) then
-                oldCF = myRoot.CFrame
-                local highOrigin = oldCF * CFrame.new(0, 12, 0)
-                if GS.IsVisible(targetPart, highOrigin.Position) then
-                    myRoot.CFrame = highOrigin
-                end
-            end
             pcall(function()
-                rem:InvokeServer(1, targetPos, "AH2")
+                if rem:IsA("RemoteFunction") then
+                    rem:InvokeServer(1, targetPos, "AH2")
+                elseif rem:IsA("RemoteEvent") then
+                    rem:FireServer(CFrame.new(targetPos), targetPos)
+                end
             end)
-            if oldCF and myRoot then
-                RunService.Heartbeat:Wait()
-                myRoot.CFrame = oldCF
-            end
         end)
         return true
     end
@@ -200,14 +192,18 @@ function GS.RemoteFireLivingSheriffGun(customTargetPos)
     end
     local remote = GS.FindGunShootRemote(liveGun)
     if remote then
-        local m = GS.FindByRole("Murderer")
-        local targetPos = customTargetPos
-            or (m and m.Character and m.Character:FindFirstChild("HumanoidRootPart") and (m.Character.HumanoidRootPart.Position + Vector3.new(0, 0.25, 0)))
-            or GS.GetExactCrosshairWorldPoint()
-        if m then GS.LastAttackData = {Player = m, Time = tick()} end
+        local _, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
+        local targetPos = customTargetPos or tPos or GS.GetExactCrosshairWorldPoint()
+        if tPlr then GS.LastAttackData = {Player = tPlr, Time = tick()} end
         GS.PlayCSGOWeaponSound(true)
         task.spawn(function()
-            pcall(function() remote:InvokeServer(1, targetPos, "AH2") end)
+            pcall(function()
+                if remote:IsA("RemoteFunction") then
+                    remote:InvokeServer(1, targetPos, "AH2")
+                elseif remote:IsA("RemoteEvent") then
+                    remote:FireServer(CFrame.new(targetPos), targetPos)
+                end
+            end)
         end)
         return true
     end
@@ -239,28 +235,34 @@ function GS.StealGunFromLivingSheriff()
         clonedGun.Parent = myBp
         local hum = myChar:FindFirstChildOfClass("Humanoid")
         if hum then hum:EquipTool(clonedGun) end
-
-        GS.TrackConnection(clonedGun.Activated:Connect(function()
-            local _, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
-            local shotPos = tPos or GS.GetExactCrosshairWorldPoint()
-            local realRemote = GS.FindGunShootRemote(liveGun) or GS.FindGunShootRemote(clonedGun)
-            if realRemote then
-                GS.PlayCSGOWeaponSound(true)
-                GS.SpawnHitVisuals(shotPos, tPlr and tPlr.Name or nil, 100, tPlr and tPlr.Character or nil)
-                task.spawn(function()
-                    pcall(function() realRemote:InvokeServer(1, shotPos, "AH2") end)
-                end)
-            end
-        end))
         GS.PushSkeetLog(string.format("Клонирован револьвер живого Шерифа (%s)!", sheriffPlr.Name), GS.Skeet.Accent)
     end
 end
 
 -------------------------------------------------------------------------
--- СТОПРОЦЕНТНЫЙ ХУК МЕТАТАБЛИЦЫ MM2 (ОБХОД КЛИЕНТСКОГО РЕЙКАСТА KNIFELOCAL)
+-- УНИВЕРСАЛЬНЫЙ ХУК МЕТАТАБЛИЦЫ (ОБЪЕДИНЯЕТ ТВОЙ RAGE-КОД + ОФИЦИАЛЬНЫЙ MM2 + МОДЫ!)
 -------------------------------------------------------------------------
 local mt = getrawmetatable and getrawmetatable(game)
 GS.mt = mt
+
+-- Проверяет, принадлежит ли вызываемый RemoteEvent / RemoteFunction твоему оружию в руках
+local function IsWeaponRemote(obj, method)
+    local name = tostring(obj)
+    if name == "Shoot" or name == "ShootGun" or name == "UseTool" or name == "Fire" or name == "CreateBeam" or name == "Throw" or name == "KnifeThrown" then
+        return true
+    end
+    -- Проверяем, лежит ли этот Remote внутри нашего Персонажа / Tool (Gun или Knife)
+    local myChar = LocalPlayer.Character
+    if myChar then
+        local ok, isDesc = pcall(function()
+            return obj:IsDescendantOf(myChar)
+        end)
+        if ok and isDesc and name ~= "Stab" then
+            return true
+        end
+    end
+    return false
+end
 
 if mt and setreadonly then
     GS.oldNamecall = mt.__namecall
@@ -269,7 +271,7 @@ if mt and setreadonly then
     local oldIndex = GS.oldIndex
     setreadonly(mt, false)
 
-    -- 1. Хук Mouse.Hit / Target / UnitRay (Возвращает CFrame.lookAt с правильным углом луча!)
+    -- 1. Хук Mouse.Hit / Mouse.Target / Mouse.UnitRay (Подменяет точку прицеливания до выстрела)
     mt.__index = newcclosure(function(self, key)
         if not GS.Unhooked and not checkcaller() and self == LocalMouse then
             local orig = Camera.CFrame.Position
@@ -299,7 +301,7 @@ if mt and setreadonly then
         return oldIndex(self, key)
     end)
 
-    -- 2. Хук InvokeServer (CreateBeam) + Клиентский Рейкаст KnifeLocal (FindPartOnRayWithIgnoreList)
+    -- 2. Универсальный перехватчик выстрелов и лучей (Silent Aim + Wallbang)
     mt.__namecall = newcclosure(function(self, ...)
         if GS.Unhooked or checkcaller() or GS.RaycastBypass then
             return oldNamecall(self, ...)
@@ -308,11 +310,10 @@ if mt and setreadonly then
         local method = getnamecallmethod()
         local args = {...}
 
-        -- КЛЮЧЕВОЙ ФИКС: Когда KnifeLocal пускает луч от бедра и втыкается в пол/рампу/стену перед тобой,
-        -- мы перехватываем этот луч и возвращаем напрямую хитбокс врага (CurrentTargetPart, CurrentAimPos)!
+        -- WALLBANG ДЛЯ ЛУЧЕЙ ROBLOX (Пробивает стены в старых и новых скриптах револьвера)
         if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" then
             local myChar = LocalPlayer.Character
-            if myChar and myChar:FindFirstChild("Gun") then
+            if myChar and myChar:FindFirstChildOfClass("Tool") then
                 if Config.SilentAim and GS.CurrentTargetPart and GS.CurrentAimPos then
                     return GS.CurrentTargetPart, GS.CurrentAimPos, Vector3.new(0, 1, 0), Enum.Material.Plastic
                 elseif Config.FixBulletDrop then
@@ -320,34 +321,84 @@ if mt and setreadonly then
                     return nil, exactP, Vector3.new(0, 1, 0), Enum.Material.Air
                 end
             end
-        end
-
-        -- ПЕРЕХВАТ ВЫСТРЕЛА ПИСТОЛЕТА: CreateBeam.RemoteFunction:InvokeServer(1, hitPos, "AH2")
-        if method == "InvokeServer" and (args[1] == 1 and typeof(args[2]) == "Vector3") then
-            -- Звук AWP играет ТОЛЬКО здесь, когда пистолет реально стреляет (никаких ложных звуков на КД!)
-            GS.PlayCSGOWeaponSound(true)
-
-            if Config.SilentAim and GS.CurrentTargetPart and GS.CurrentAimPos and math.random(1, 100) <= Config.HitChance then
-                GS.LastAttackData = {Player = GS.CurrentTargetPlr, Time = tick()}
-                args[2] = GS.CurrentAimPos
-                return oldNamecall(self, unpack(args))
-            elseif Config.FixBulletDrop then
-                args[2] = GS.GetExactCrosshairWorldPoint()
+        elseif method == "Raycast" and self == Workspace and Config.Wallbang and Config.SilentAim then
+            local myChar = LocalPlayer.Character
+            if myChar and myChar:FindFirstChild("Gun") and GS.CurrentTargetPart and GS.CurrentAimPos then
+                -- Подменяем направление луча Workspace:Raycast прямо в голову/торс врага
+                local orig = typeof(args[1]) == "Vector3" and args[1] or Camera.CFrame.Position
+                args[2] = (GS.CurrentAimPos - orig).Unit * 1000
                 return oldNamecall(self, unpack(args))
             end
         end
 
-        -- ПЕРЕХВАТ БРОСКА НОЖА: Knife.Throw:FireServer(...)
-        if method == "FireServer" and #args >= 1 and (typeof(args[1]) == "CFrame" or typeof(args[2]) == "Vector3") then
-            local selfStr = tostring(self)
-            if selfStr == "Throw" or selfStr == "KnifeThrown" then
-                if (Config.SilentAim or Config.SilentKnifeThrow) and GS.CurrentTargetPart and GS.CurrentAimPos then
-                    GS.LastAttackData = {Player = GS.CurrentTargetPlr, Time = tick()}
+        -- УНИВЕРСАЛЬНЫЙ ПЕРЕХВАТ ВЫСТРЕЛА (FireServer И InvokeServer для любого MM2 и модов!)
+        if method == "FireServer" or method == "InvokeServer" then
+            local isWep = IsWeaponRemote(self, method)
+            local isOfficialCreateBeam = (method == "InvokeServer" and args[1] == 1 and typeof(args[2]) == "Vector3")
+
+            if isWep or isOfficialCreateBeam then
+                local tPart, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
+                local targetPart = tPart or GS.CurrentTargetPart
+                local targetPlr = tPlr or GS.CurrentTargetPlr
+                local aimPos = tPos or GS.CurrentAimPos
+
+                local myChar = LocalPlayer.Character
+                if myChar and myChar:FindFirstChild("Gun") then
+                    GS.PlayCSGOWeaponSound(true)
+                end
+
+                if Config.SilentAim and targetPart and aimPos and math.random(1, 100) <= Config.HitChance then
+                    GS.LastAttackData = {Player = targetPlr, Time = tick()}
+
+                    -- Подсчитываем, сколько координат (Vector3/CFrame) передаётся в аргументах:
+                    -- Если передаётся 1 координата (как в твоём коде Args[1] или в CreateBeam Args[2]) — ставим туда aimPos.
+                    -- Если передаётся 2 координаты (Origin, TargetPosition) — первую не трогаем, а вторую ставим в aimPos!
+                    local coordIndices = {}
+                    for i, v in ipairs(args) do
+                        if typeof(v) == "Vector3" or typeof(v) == "CFrame" then
+                            table.insert(coordIndices, i)
+                        end
+                    end
+
+                    if #coordIndices == 1 then
+                        local idx = coordIndices[1]
+                        if typeof(args[idx]) == "Vector3" then
+                            args[idx] = aimPos
+                        elseif typeof(args[idx]) == "CFrame" then
+                            args[idx] = CFrame.lookAt(aimPos, aimPos + (aimPos - Camera.CFrame.Position).Unit)
+                        end
+                    elseif #coordIndices >= 2 then
+                        -- Первая координата может быть точкой старта (или CFrame броска), а последняя — точкой попадания!
+                        local firstIdx = coordIndices[1]
+                        local lastIdx = coordIndices[#coordIndices]
+                        if typeof(args[firstIdx]) == "CFrame" then
+                            args[firstIdx] = CFrame.lookAt(args[firstIdx].Position, aimPos)
+                        end
+                        if typeof(args[lastIdx]) == "Vector3" then
+                            args[lastIdx] = aimPos
+                        elseif typeof(args[lastIdx]) == "CFrame" then
+                            args[lastIdx] = CFrame.lookAt(aimPos, aimPos + (aimPos - Camera.CFrame.Position).Unit)
+                        end
+                    else
+                        -- Если ремоут вызван вообще без координат (например UseTool()), докидываем позицию врага в Args[1] как в твоём скрипте!
+                        args[1] = aimPos
+                    end
+
+                    -- Дополнительно подменяем Instance-цель, если ремоут передаёт BasePart врага
+                    for i, v in ipairs(args) do
+                        if typeof(v) == "Instance" and v:IsA("BasePart") then
+                            args[i] = targetPart
+                        end
+                    end
+
+                    return oldNamecall(self, unpack(args))
+                elseif Config.FixBulletDrop then
+                    local exactPos = GS.GetExactCrosshairWorldPoint()
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" then
-                            args[i] = GS.CurrentAimPos
+                            args[i] = exactPos
                         elseif typeof(v) == "CFrame" then
-                            args[i] = CFrame.lookAt(v.Position, GS.CurrentAimPos)
+                            args[i] = CFrame.lookAt(exactPos, exactPos + (exactPos - Camera.CFrame.Position).Unit)
                         end
                     end
                     return oldNamecall(self, unpack(args))
@@ -361,7 +412,7 @@ if mt and setreadonly then
     setreadonly(mt, true)
 end
 
--- РАБОЧИЙ ЛЕГИТБОТ И ТРИГГЕРБОТ (Выполняется после скрипта камеры Roblox!)
+-- РАБОЧИЙ ЛЕГИТБОТ И ТРИГГЕРБОТ (После обновления камеры Roblox)
 local LastTriggerShot = 0
 
 GS.BindRenderStep("GS_LegitAim", Enum.RenderPriority.Camera.Value + 1, function()
@@ -372,7 +423,6 @@ GS.BindRenderStep("GS_LegitAim", Enum.RenderPriority.Camera.Value + 1, function(
     local myChar = LocalPlayer.Character
     if not myChar then return end
 
-    -- Доводка камеры Легитбота
     if Config.LegitAim and not (GS.OuterWindow and GS.OuterWindow.Visible) then
         local activeKey = (Config.LegitAimKey == "Always On")
             or (Config.LegitAimKey == "MouseButton2 (RMB)" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2))
@@ -383,19 +433,18 @@ GS.BindRenderStep("GS_LegitAim", Enum.RenderPriority.Camera.Value + 1, function(
             if lPart and lPos then
                 local camPos = Camera.CFrame.Position
                 local goalCF = CFrame.lookAt(camPos, lPos)
-                local alpha = math.clamp(1 / math.max(Config.LegitSmooth, 1), 0.04, 0.90)
+                local alpha = math.clamp(1 / math.max(Config.LegitSmooth, 1), 0.05, 0.95)
                 Camera.CFrame = Camera.CFrame:Lerp(goalCF, alpha)
             end
         end
     end
 
-    -- Легит Триггербот
     if Config.LegitTriggerbot and (tick() - LastTriggerShot) >= (Config.TriggerbotDelay / 1000) then
         local gun = myChar:FindFirstChild("Gun")
         if gun and GS.CurrentTargetPart and GS.CurrentTargetPlr and GS.IsVisible(GS.CurrentTargetPart) then
             local sp, onScreen = Camera:WorldToViewportPoint(GS.CurrentTargetPart.Position)
             local mousePos = UserInputService:GetMouseLocation()
-            if onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude <= 35 then
+            if onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude <= 38 then
                 LastTriggerShot = tick()
                 GS.DirectShootGunAt(GS.CurrentAimPos, GS.CurrentTargetPlr, GS.CurrentTargetPart)
             end
