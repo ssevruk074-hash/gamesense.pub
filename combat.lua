@@ -1,4 +1,4 @@
--- File: combat.lua | Zero-Camera-Freeze Silent Aim + 100% Server Wallbang Bypass (Micro-LOS Peak) + Smooth Legitbot
+-- File: combat.lua | Zero-Freeze Silent Aim, 100% Wallbang, Anti-Fling & Target Fling (Rage Suite)
 local GS = _G.GS
 if not GS then return end
 
@@ -8,10 +8,10 @@ local UserInputService = GS.UserInputService
 local Workspace = GS.Workspace
 local Camera = GS.Camera
 local LocalPlayer = GS.LocalPlayer
-local LocalMouse = GS.LocalMouse
+local LocalMouse = LocalPlayer:GetMouse()
 local Config = GS.Config
+local Skeet = GS.Skeet
 
--- Время последнего клика ЛКМ (чтобы Mouse.Hit подменялся ТОЛЬКО в момент выстрела и НИКОГДА не ломал камеру Roblox!)
 local LastWeaponClickTime = 0
 
 function GS.IsVisible(part, customOrigin)
@@ -28,7 +28,6 @@ function GS.IsVisible(part, customOrigin)
     return (not res) or res.Instance:IsDescendantOf(part.Parent)
 end
 
--- Идеальный 3D луч из прицела (0px погрешности, безопасный для камеры)
 function GS.GetExactCrosshairWorldPoint()
     local ray = Camera:ScreenPointToRay(LocalMouse.X, LocalMouse.Y)
     GS.RaycastBypass = true
@@ -41,20 +40,16 @@ function GS.GetExactCrosshairWorldPoint()
 end
 
 -------------------------------------------------------------------------
--- УМНЫЙ ПОИСК ЦЕЛИ (МУЛЬТИ-ПОИНТ + 360° RAGE FALLBACK)
+-- УМНЫЙ ПОИСК ЦЕЛИ (МУЛЬТИ-ПОИНТ + 360° RAGE)
 -------------------------------------------------------------------------
 local MultiPointList = {"HumanoidRootPart", "Head", "UpperTorso", "LowerTorso", "Torso", "RightHand", "LeftHand"}
 
 local function GetBestCharacterPart(char)
     local preferred = char:FindFirstChild(Config.HitPart) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
-    if preferred and GS.IsVisible(preferred) then
-        return preferred
-    end
+    if preferred and GS.IsVisible(preferred) then return preferred end
     for _, name in ipairs(MultiPointList) do
         local p = char:FindFirstChild(name)
-        if p and GS.IsVisible(p) then
-            return p
-        end
+        if p and GS.IsVisible(p) then return p end
     end
     return preferred
 end
@@ -134,7 +129,7 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
 end
 
 -------------------------------------------------------------------------
--- ПОИСК РЕМОУТОВ ОРУЖИЯ И 100% СЕРВЕРНЫЙ WALLBANG (MICRO-LOS BYPASS)
+-- ПОИСК РЕМОУТОВ И 100% СЕРВЕРНЫЙ WALLBANG (MICRO-LOS BYPASS)
 -------------------------------------------------------------------------
 function GS.FindLivingSheriffGun()
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -164,11 +159,9 @@ function GS.FindGunShootRemote(gunInstance)
     return gunInstance:FindFirstChildOfClass("RemoteFunction", true) or gunInstance:FindFirstChildOfClass("RemoteEvent", true)
 end
 
--- Находит точку прямой видимости около врага для 100% пробития любых стен на сервере
 local function GetWallbangVantageCFrame(myRoot, targetPart)
     if not myRoot or not targetPart then return nil end
     local tPos = targetPart.Position
-    -- Проверяем 5 точек вокруг врага (сверху, сзади, сбоку), откуда нет стен до его хитбокса
     local offsets = {
         Vector3.new(0, 6, 0),
         Vector3.new(0, 3, 4),
@@ -185,7 +178,6 @@ local function GetWallbangVantageCFrame(myRoot, targetPart)
     return CFrame.lookAt(tPos + Vector3.new(0, 4, 2), tPos)
 end
 
--- Выполняет гарантированный выстрел в цель (с серверным обходом стен Wallbang!)
 function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
@@ -201,21 +193,16 @@ function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
         local savedCF = nil
         local needWallbangBypass = Config.Wallbang and myRoot and targetPart and (not GS.IsVisible(targetPart))
 
-        -- Если враг стоит за глухой стеной и включён Wallbang:
-        -- На 1 серверный тик ставим CFrame в точку прямой видимости около врага, стреляем и сразу возвращаем обратно до рендера кадра!
         if needWallbangBypass then
             savedCF = myRoot.CFrame
             local vantageCF = GetWallbangVantageCFrame(myRoot, targetPart)
-            if vantageCF then
-                myRoot.CFrame = vantageCF
-            end
+            if vantageCF then myRoot.CFrame = vantageCF end
         end
 
         pcall(function()
             if rem:IsA("RemoteFunction") then
                 rem:InvokeServer(1, targetPos, "AH2")
             elseif rem:IsA("RemoteEvent") then
-                -- Поддержка как CFrame-ремоутов (моды MM2), так и Vector3
                 rem:FireServer(CFrame.lookAt(Camera.CFrame.Position, targetPos), targetPos)
                 rem:FireServer(targetPos)
             end
@@ -223,9 +210,7 @@ function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
 
         if savedCF and myRoot then
             RunService.RenderStepped:Wait()
-            if myRoot and myRoot.Parent then
-                myRoot.CFrame = savedCF
-            end
+            if myRoot and myRoot.Parent then myRoot.CFrame = savedCF end
         end
     end)
     return true
@@ -269,7 +254,7 @@ function GS.StealGunFromLivingSheriff()
         hrp.CFrame = gunDrop.CFrame
         task.wait(0.08)
         hrp.CFrame = old
-        GS.PushSkeetLog("Подобран выпавший револьвер Шерифа!", GS.Skeet.Accent)
+        GS.PushSkeetLog("Подобран выпавший револьвер Шерифа!", Skeet.Accent)
         return
     end
 
@@ -282,18 +267,15 @@ function GS.StealGunFromLivingSheriff()
         clonedGun.Parent = myBp
         local hum = myChar:FindFirstChildOfClass("Humanoid")
         if hum then hum:EquipTool(clonedGun) end
-        GS.PushSkeetLog(string.format("Клонирован револьвер живого Шерифа (%s)!", sheriffPlr.Name), GS.Skeet.Accent)
+        GS.PushSkeetLog(string.format("Клонирован револьвер живого Шерифа (%s)!", sheriffPlr.Name), Skeet.Accent)
     end
 end
 
--- Отслеживаем нажатие ЛКМ, чтобы активировать подмену Mouse.Hit строго в момент выстрела (0% влияния на камеру!)
 GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
     if not gp and inp.UserInputType == Enum.UserInputType.MouseButton1 and not (GS.OuterWindow and GS.OuterWindow.Visible) then
         local myChar = LocalPlayer.Character
         if myChar and (myChar:FindFirstChild("Gun") or myChar:FindFirstChild("Knife")) then
             LastWeaponClickTime = tick()
-
-            -- Если в руках Gun и включён DirectClickInvoke + Wallbang, выполняем гарантированный серверный прострел!
             if myChar:FindFirstChild("Gun") and Config.SilentAim and Config.DirectClickInvoke then
                 local tPart, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
                 if tPart and tPos and math.random(1, 100) <= Config.HitChance then
@@ -305,7 +287,7 @@ GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
 end))
 
 -------------------------------------------------------------------------
--- БЕЗОПАСНЫЙ ДЛЯ КАМЕРЫ ХУК МЕТАТАБЛИЦЫ (БЕЗ ПЕРЕХВАТА CAMERA UNITRAY!)
+-- ХУК МЕТАТАБЛИЦЫ (БЕЗ ЗАВИСАНИЯ КАМЕРЫ + 100% WALLBANG РЕЙКАСТЫ)
 -------------------------------------------------------------------------
 local mt = getrawmetatable and getrawmetatable(game)
 GS.mt = mt
@@ -318,9 +300,7 @@ local function IsWeaponRemote(obj)
     local myChar = LocalPlayer.Character
     if myChar then
         local ok, isDesc = pcall(function() return obj:IsDescendantOf(myChar) end)
-        if ok and isDesc and name ~= "Stab" then
-            return true
-        end
+        if ok and isDesc and name ~= "Stab" then return true end
     end
     return false
 end
@@ -332,10 +312,7 @@ if mt and setreadonly then
     local oldIndex = GS.oldIndex
     setreadonly(mt, false)
 
-    -- 1. Хук Mouse.Hit / Mouse.Target:
-    -- КРИТИЧЕСКИЙ ФИКС КАМЕРЫ:
-    -- а) НИКОГДА не перехватываем `UnitRay` (его читает Poppercam камеры Roblox каждый кадр!).
-    -- б) Подменяем `Hit` и `Target` ТОЛЬКО когда у тебя в руках реально экипирован `Gun` или `Knife`!
+    -- Подмена Mouse.Hit ТОЛЬКО при активном клике с оружием в руках (0% лагов камеры!)
     mt.__index = newcclosure(function(self, key)
         if not GS.Unhooked and not checkcaller() and self == LocalMouse then
             if key == "Hit" or key == "hit" or key == "Target" or key == "target" then
@@ -360,7 +337,6 @@ if mt and setreadonly then
         return oldIndex(self, key)
     end)
 
-    -- 2. Хук выстрелов и клиентских лучей оружия (Silent Aim + Wallbang)
     mt.__namecall = newcclosure(function(self, ...)
         if GS.Unhooked or checkcaller() or GS.RaycastBypass then
             return oldNamecall(self, ...)
@@ -369,9 +345,7 @@ if mt and setreadonly then
         local method = getnamecallmethod()
         local args = {...}
 
-        -- Перехватываем лучи FindPartOnRay ТОЛЬКО в момент выстрела (в течение 0.15 сек после нажатия ЛКМ),
-        -- чтобы никогда не задеть лучи камеры Poppercam!
-        if (tick() - LastWeaponClickTime) <= 0.15 then
+        if (tick() - LastWeaponClickTime) <= 0.18 then
             if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" then
                 if Config.SilentAim and GS.CurrentTargetPart and GS.CurrentAimPos then
                     return GS.CurrentTargetPart, GS.CurrentAimPos, Vector3.new(0, 1, 0), Enum.Material.Plastic
@@ -382,7 +356,6 @@ if mt and setreadonly then
             end
         end
 
-        -- ПЕРЕХВАТ ВЫСТРЕЛА (FireServer И InvokeServer)
         if method == "FireServer" or method == "InvokeServer" then
             local isWep = IsWeaponRemote(self)
             local isOfficialCreateBeam = (method == "InvokeServer" and args[1] == 1 and typeof(args[2]) == "Vector3")
@@ -402,14 +375,11 @@ if mt and setreadonly then
                 if Config.SilentAim and targetPart and aimPos and math.random(1, 100) <= Config.HitChance then
                     GS.LastAttackData = {Player = targetPlr, Time = tick()}
 
-                    -- Если включён Wallbang и цель за стеной — мгновенно ставим серверный CFrame в точку видимости на время вызова ремоута!
                     local savedCF = nil
                     if Config.Wallbang and myRoot and not GS.IsVisible(targetPart) then
                         savedCF = myRoot.CFrame
                         local vantageCF = GetWallbangVantageCFrame(myRoot, targetPart)
-                        if vantageCF then
-                            myRoot.CFrame = vantageCF
-                        end
+                        if vantageCF then myRoot.CFrame = vantageCF end
                     end
 
                     local coordIndices = {}
@@ -421,22 +391,14 @@ if mt and setreadonly then
 
                     if #coordIndices == 1 then
                         local idx = coordIndices[1]
-                        if typeof(args[idx]) == "Vector3" then
-                            args[idx] = aimPos
-                        elseif typeof(args[idx]) == "CFrame" then
-                            args[idx] = CFrame.new(aimPos)
-                        end
+                        if typeof(args[idx]) == "Vector3" then args[idx] = aimPos
+                        elseif typeof(args[idx]) == "CFrame" then args[idx] = CFrame.new(aimPos) end
                     elseif #coordIndices >= 2 then
                         local firstIdx = coordIndices[1]
                         local lastIdx = coordIndices[#coordIndices]
-                        if typeof(args[firstIdx]) == "CFrame" then
-                            args[firstIdx] = CFrame.lookAt(args[firstIdx].Position, aimPos)
-                        end
-                        if typeof(args[lastIdx]) == "Vector3" then
-                            args[lastIdx] = aimPos
-                        elseif typeof(args[lastIdx]) == "CFrame" then
-                            args[lastIdx] = CFrame.new(aimPos)
-                        end
+                        if typeof(args[firstIdx]) == "CFrame" then args[firstIdx] = CFrame.lookAt(args[firstIdx].Position, aimPos) end
+                        if typeof(args[lastIdx]) == "Vector3" then args[lastIdx] = aimPos
+                        elseif typeof(args[lastIdx]) == "CFrame" then args[lastIdx] = CFrame.new(aimPos) end
                     else
                         args[1] = aimPos
                     end
@@ -449,9 +411,7 @@ if mt and setreadonly then
 
                     if savedCF and myRoot then
                         task.delay(0.03, function()
-                            if myRoot and myRoot.Parent then
-                                myRoot.CFrame = savedCF
-                            end
+                            if myRoot and myRoot.Parent then myRoot.CFrame = savedCF end
                         end)
                     end
 
@@ -459,11 +419,8 @@ if mt and setreadonly then
                 elseif Config.FixBulletDrop then
                     local exactPos = GS.GetExactCrosshairWorldPoint()
                     for i, v in ipairs(args) do
-                        if typeof(v) == "Vector3" then
-                            args[i] = exactPos
-                        elseif typeof(v) == "CFrame" then
-                            args[i] = CFrame.new(exactPos)
-                        end
+                        if typeof(v) == "Vector3" then args[i] = exactPos
+                        elseif typeof(v) == "CFrame" then args[i] = CFrame.new(exactPos) end
                     end
                     return oldNamecall(self, unpack(args))
                 end
@@ -476,16 +433,67 @@ if mt and setreadonly then
     setreadonly(mt, true)
 end
 
--- ЦИКЛ ОБНОВЛЕНИЯ ЦЕЛИ, БЕЗОПАСНОГО ЛЕГИТБОТА И ТРИГГЕРБОТА
+-------------------------------------------------------------------------
+-- АНТИ-ФЛИНГ И ТАРГЕТ ФЛИНГ (АНТИ-ТОЛЧОК + УДАЛЕНИЕ ИГРОКОВ ИЗ СЕРВЕРА)
+-------------------------------------------------------------------------
+local AntiFlingActive = true
+local TargetFlingTarget = nil
+
+-- 1. АНТИ-ФЛИНГ: Полностью отключает столкновения с телами других игроков, чтобы тебя не могли закинуть за карту читеры!
+RunService.Stepped:Connect(function()
+    if GS.Unhooked or not AntiFlingActive then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            for _, part in ipairs(p.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- 2. ТАРГЕТ ФЛИНГ (Раскручивает и улетает в пустоту выбранную цель из Target HUD / ближайшего врага)
+function GS.ToggleTargetFling()
+    TargetFlingTarget = GS.CurrentTargetPlr
+    if not TargetFlingTarget then
+        GS.PushSkeetLog("Target Fling: Нет цели в прицеле!", Skeet.Danger)
+        return
+    end
+    GS.PushSkeetLog("Target Fling активирован на: " .. TargetFlingTarget.Name, Skeet.Gold)
+    task.spawn(function()
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local tChar = TargetFlingTarget.Character
+        local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot or not tRoot then return end
+
+        local bav = Instance.new("BodyAngularVelocity", myRoot)
+        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bav.AngularVelocity = Vector3.new(0, 99999, 0) -- Мгновенное вращение со скоростью света
+
+        local startTime = tick()
+        while tick() - startTime < 1.2 and not GS.Unhooked do
+            if tRoot and tRoot.Parent then
+                myRoot.CFrame = tRoot.CFrame
+                myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
+            end
+            RunService.RenderStepped:Wait()
+        end
+        bav:Destroy()
+        if myRoot then myRoot.AssemblyLinearVelocity = Vector3.zero end
+        GS.PushSkeetLog("Target Fling завершён!", Skeet.Accent)
+    end)
+end
+
 local LastTriggerShot = 0
 
-GS.TrackConnection(RunService.RenderStepped:Connect(function()
+GS.BindRenderStep("GS_LegitAim", Enum.RenderPriority.Camera.Value + 1, function()
     if GS.Unhooked then return end
 
     local myChar = LocalPlayer.Character
     local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
 
-    -- Гарантируем, что CameraSubject всегда привязан к нашему Humanoid и камера никогда не отвязывается!
     if myHum and Camera.CameraSubject ~= myHum then
         Camera.CameraSubject = myHum
     end
@@ -494,7 +502,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function()
 
     if not myChar then return end
 
-    -- Плавный Легитбот (работает только когда зажата кнопка и не блокирует камеру)
     if Config.LegitAim and not (GS.OuterWindow and GS.OuterWindow.Visible) then
         local activeKey = (Config.LegitAimKey == "Always On")
             or (Config.LegitAimKey == "MouseButton2 (RMB)" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2))
@@ -507,14 +514,13 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function()
                 local dist = (lPos - camPos).Magnitude
                 if dist > 0.5 then
                     local goalCF = CFrame.lookAt(camPos, lPos)
-                    local alpha = math.clamp(1 / math.max(Config.LegitSmooth, 2), 0.04, 0.45)
+                    local alpha = math.clamp(1 / math.max(Config.LegitSmooth, 2), 0.05, 0.95)
                     Camera.CFrame = Camera.CFrame:Lerp(goalCF, alpha)
                 end
             end
         end
     end
 
-    -- Триггербот
     if Config.LegitTriggerbot and (tick() - LastTriggerShot) >= (Config.TriggerbotDelay / 1000) then
         local gun = myChar:FindFirstChild("Gun")
         if gun and GS.CurrentTargetPart and GS.CurrentTargetPlr and GS.IsVisible(GS.CurrentTargetPart) then
@@ -526,4 +532,4 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function()
             end
         end
     end
-end))
+end)
