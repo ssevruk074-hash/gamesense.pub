@@ -1,4 +1,4 @@
--- File: visuals_ui.lua | 1:1 Skeet.cc UI, Corner ESP, Custom Scope, 2D Radar, Target HUD & JSON Config System
+-- File: visuals_ui.lua | Ultimate Forum Visuals Pack (Blissful 3D Box + Exunys HeadDot/Tracers + Skeet Crosshair Indicators + Velocity Graph)
 local GS = _G.GS
 if not GS then return end
 
@@ -15,8 +15,39 @@ local Config = GS.Config
 local Skeet = GS.Skeet
 local ScreenGui = GS.ScreenGui
 
+-- Дополняем конфиг новыми визуальными функциями с форумов (чтобы всё работало сразу без правки core.lua)
+local ExtraVisualDefaults = {
+    ESP_BoxStyle = "Corner", -- Corner, Full 2D, 3D Box (12 Lines)
+    ESP_HeadDot = true,
+    ESP_LookLaser = true,
+    ESP_Tracers = false,
+    ESP_TracerOrigin = "Bottom", -- Bottom, Center, Mouse
+    ESP_WeaponHeld = true, -- Показывает, держит ли враг нож/револьвер прямо сейчас в руках
+    SkeetIndicators = true, -- Индикаторы под прицелом (FAKE, DT, AA, DMG, WALL) как в CS:GO Skeet.cc
+    VelocityGraph = true, -- Спидометр и живой график скорости внизу экрана
+    SpectatorList = true, -- Окно списка игроков, которые следят за тобой или мертвы
+    OrbitSpheres = true, -- 3D вращающиеся неоновые сферы вокруг тебя
+    OrbitCount = 3,
+    OrbitSpeed = 4,
+    OrbitRadius = 4,
+    ThirdPersonZeroClip = true, -- Камера от 3-го лица не приближается при упоре в стену
+    WorldBloom = false,
+    BloomIntensity = 40
+}
+for k, v in pairs(ExtraVisualDefaults) do
+    if Config[k] == nil then Config[k] = v end
+    if GS.DefaultConfigBackup and GS.DefaultConfigBackup[k] == nil then
+        GS.DefaultConfigBackup[k] = v
+    end
+end
+
+local BloomEffect = GS.TrackInstance(Instance.new("BloomEffect"))
+BloomEffect.Name = "GS_Bloom"
+BloomEffect.Enabled = false
+BloomEffect.Parent = Lighting
+
 -------------------------------------------------------------------------
--- КАСТОМНЫЙ ПРИЦЕЛ СКИТА, 2D РАДАР И TARGET HUD
+-- КАСТОМНЫЙ ПРИЦЕЛ СКИТА, SKEET INDICATORS ПОД ПРИЦЕЛОМ И VELOCITY GRAPH
 -------------------------------------------------------------------------
 local ScopeHolder = Instance.new("Frame", ScreenGui)
 ScopeHolder.Name = "GS_CustomScope"
@@ -26,37 +57,103 @@ ScopeHolder.Active = false
 ScopeHolder.Visible = false
 
 local ScopeTop = Instance.new("Frame", ScopeHolder)
-ScopeTop.BorderSizePixel = 0
-ScopeTop.BackgroundColor3 = Color3.new(1, 1, 1)
+ScopeTop.BorderSizePixel = 0; ScopeTop.BackgroundColor3 = Color3.new(1, 1, 1)
 local GradTop = Instance.new("UIGradient", ScopeTop)
 GradTop.Rotation = -90
 GradTop.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
 
 local ScopeBot = Instance.new("Frame", ScopeHolder)
-ScopeBot.BorderSizePixel = 0
-ScopeBot.BackgroundColor3 = Color3.new(1, 1, 1)
+ScopeBot.BorderSizePixel = 0; ScopeBot.BackgroundColor3 = Color3.new(1, 1, 1)
 local GradBot = Instance.new("UIGradient", ScopeBot)
 GradBot.Rotation = 90
 GradBot.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
 
 local ScopeLeft = Instance.new("Frame", ScopeHolder)
-ScopeLeft.BorderSizePixel = 0
-ScopeLeft.BackgroundColor3 = Color3.new(1, 1, 1)
+ScopeLeft.BorderSizePixel = 0; ScopeLeft.BackgroundColor3 = Color3.new(1, 1, 1)
 local GradLeft = Instance.new("UIGradient", ScopeLeft)
 GradLeft.Rotation = 180
 GradLeft.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
 
 local ScopeRight = Instance.new("Frame", ScopeHolder)
-ScopeRight.BorderSizePixel = 0
-ScopeRight.BackgroundColor3 = Color3.new(1, 1, 1)
+ScopeRight.BorderSizePixel = 0; ScopeRight.BackgroundColor3 = Color3.new(1, 1, 1)
 local GradRight = Instance.new("UIGradient", ScopeRight)
 GradRight.Rotation = 0
 GradRight.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)})
 
 local ScopeDot = Instance.new("Frame", ScopeHolder)
-ScopeDot.BorderSizePixel = 0
-ScopeDot.BackgroundColor3 = Skeet.Accent
+ScopeDot.BorderSizePixel = 0; ScopeDot.BackgroundColor3 = Skeet.Accent
 
+-- SKEET CROSSHAIR INDICATORS (Под прицелом: FAKE, SILENT, WALLBANG, DT, FL)
+local SkeetIndHolder = Instance.new("Frame", ScreenGui)
+SkeetIndHolder.Size = UDim2.new(0, 160, 0, 120)
+SkeetIndHolder.BackgroundTransparency = 1
+local indLayout = Instance.new("UIListLayout", SkeetIndHolder)
+indLayout.Padding = UDim.new(0, 1)
+indLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+
+local IndLabels = {}
+for i = 1, 6 do
+    local lbl = Instance.new("TextLabel", SkeetIndHolder)
+    lbl.Size = UDim2.new(1, 0, 0, 14)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Code
+    lbl.TextSize = 12
+    lbl.TextStrokeTransparency = 0
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Visible = false
+    IndLabels[i] = lbl
+end
+
+-- VELOCITY SPEEDOMETER & GRAPH (Внизу по центру экрана, как в CS:GO HvH)
+local VelHolder = Instance.new("Frame", ScreenGui)
+VelHolder.Size = UDim2.new(0, 180, 0, 65)
+VelHolder.Position = UDim2.new(0.5, -90, 0.84, 0)
+VelHolder.BackgroundTransparency = 1
+VelHolder.Visible = false
+
+local VelText = Instance.new("TextLabel", VelHolder)
+VelText.Size = UDim2.new(1, 0, 0, 22)
+VelText.Position = UDim2.new(0, 0, 0, 0)
+VelText.BackgroundTransparency = 1
+VelText.Font = Enum.Font.SourceSansBold
+VelText.TextSize = 22
+VelText.TextColor3 = Skeet.Accent
+VelText.TextStrokeTransparency = 0
+VelText.Text = "0 u/s"
+
+local VelGraphBars = {}
+local VelHistory = {}
+for i = 1, 30 do
+    VelHistory[i] = 0
+    local bar = Instance.new("Frame", VelHolder)
+    bar.Size = UDim2.new(0, 4, 0, 2)
+    bar.Position = UDim2.new(0, (i - 1) * 6, 1, -2)
+    bar.AnchorPoint = Vector2.new(0, 1)
+    bar.BackgroundColor3 = Skeet.Accent
+    bar.BorderSizePixel = 0
+    VelGraphBars[i] = bar
+end
+
+-- SPECTATOR & ROUND STATUS LIST (Справа под вотермаркой)
+local SpecBox = Instance.new("Frame", ScreenGui)
+SpecBox.Size = UDim2.new(0, 185, 0, 24)
+SpecBox.Position = UDim2.new(1, -197, 0, 42)
+SpecBox.BackgroundColor3 = Skeet.MainBg
+SpecBox.BorderColor3 = Skeet.GroupBorder
+SpecBox.BorderSizePixel = 1
+SpecBox.AutomaticSize = Enum.AutomaticSize.Y
+local spBar = Instance.new("Frame", SpecBox)
+spBar.Size = UDim2.new(1, 0, 0, 2); spBar.BackgroundColor3 = Skeet.Cyan; spBar.BorderSizePixel = 0
+local spHdr = Instance.new("TextLabel", SpecBox)
+spHdr.Size = UDim2.new(1, 0, 0, 18); spHdr.Position = UDim2.new(0, 0, 0, 2); spHdr.BackgroundTransparency = 1
+spHdr.Font = Enum.Font.Code; spHdr.TextSize = 11; spHdr.TextColor3 = Skeet.TextActive; spHdr.Text = "Spectators / Dead"
+local spBody = Instance.new("TextLabel", SpecBox)
+spBody.Size = UDim2.new(1, -12, 0, 14); spBody.Position = UDim2.new(0, 6, 0, 20); spBody.BackgroundTransparency = 1
+spBody.Font = Enum.Font.Code; spBody.TextSize = 11; spBody.TextColor3 = Skeet.TextDim
+spBody.TextXAlignment = Enum.TextXAlignment.Left; spBody.TextYAlignment = Enum.TextYAlignment.Top
+spBody.AutomaticSize = Enum.AutomaticSize.Y
+
+-- 2D РАДАР И TARGET HUD
 local RadarFrame = Instance.new("Frame", ScreenGui)
 RadarFrame.Size = UDim2.new(0, 136, 0, 136)
 RadarFrame.Position = UDim2.new(0, 14, 0, 195)
@@ -66,74 +163,83 @@ RadarFrame.BorderSizePixel = 1
 RadarFrame.ClipsDescendants = true
 
 local RadarTopLine = Instance.new("Frame", RadarFrame)
-RadarTopLine.Size = UDim2.new(1, 0, 0, 2)
-RadarTopLine.BackgroundColor3 = Skeet.Accent
-RadarTopLine.BorderSizePixel = 0
+RadarTopLine.Size = UDim2.new(1, 0, 0, 2); RadarTopLine.BackgroundColor3 = Skeet.Accent; RadarTopLine.BorderSizePixel = 0
 
 local RadarCrossH = Instance.new("Frame", RadarFrame)
-RadarCrossH.Size = UDim2.new(1, 0, 0, 1)
-RadarCrossH.Position = UDim2.new(0, 0, 0.5, 0)
-RadarCrossH.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-RadarCrossH.BorderSizePixel = 0
+RadarCrossH.Size = UDim2.new(1, 0, 0, 1); RadarCrossH.Position = UDim2.new(0, 0, 0.5, 0)
+RadarCrossH.BackgroundColor3 = Color3.fromRGB(30, 30, 30); RadarCrossH.BorderSizePixel = 0
 
 local RadarCrossV = Instance.new("Frame", RadarFrame)
-RadarCrossV.Size = UDim2.new(0, 1, 1, 0)
-RadarCrossV.Position = UDim2.new(0.5, 0, 0, 0)
-RadarCrossV.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-RadarCrossV.BorderSizePixel = 0
+RadarCrossV.Size = UDim2.new(0, 1, 1, 0); RadarCrossV.Position = UDim2.new(0.5, 0, 0, 0)
+RadarCrossV.BackgroundColor3 = Color3.fromRGB(30, 30, 30); RadarCrossV.BorderSizePixel = 0
 
 local RadarCenterDot = Instance.new("Frame", RadarFrame)
-RadarCenterDot.Size = UDim2.new(0, 4, 0, 4)
-RadarCenterDot.Position = UDim2.new(0.5, -2, 0.5, -2)
-RadarCenterDot.BackgroundColor3 = Color3.new(1, 1, 1)
-RadarCenterDot.BorderSizePixel = 0
+RadarCenterDot.Size = UDim2.new(0, 4, 0, 4); RadarCenterDot.Position = UDim2.new(0.5, -2, 0.5, -2)
+RadarCenterDot.BackgroundColor3 = Color3.new(1, 1, 1); RadarCenterDot.BorderSizePixel = 0
 
 local RadarDots = {}
 
 local TargetHudFrame = Instance.new("Frame", ScreenGui)
-TargetHudFrame.Size = UDim2.new(0, 220, 0, 54)
-TargetHudFrame.Position = UDim2.new(0.5, -110, 0.64, 0)
+TargetHudFrame.Size = UDim2.new(0, 230, 0, 56)
+TargetHudFrame.Position = UDim2.new(0.5, -115, 0.65, 0)
 TargetHudFrame.BackgroundColor3 = Skeet.MainBg
 TargetHudFrame.BorderColor3 = Skeet.GroupBorder
 TargetHudFrame.BorderSizePixel = 1
 TargetHudFrame.Visible = false
 
 local thTop = Instance.new("Frame", TargetHudFrame)
-thTop.Size = UDim2.new(1, 0, 0, 2)
-thTop.BackgroundColor3 = Skeet.Accent
-thTop.BorderSizePixel = 0
+thTop.Size = UDim2.new(1, 0, 0, 2); thTop.BackgroundColor3 = Skeet.Accent; thTop.BorderSizePixel = 0
 
 local thName = Instance.new("TextLabel", TargetHudFrame)
-thName.Size = UDim2.new(1, -12, 0, 18)
-thName.Position = UDim2.new(0, 6, 0, 4)
-thName.BackgroundTransparency = 1
-thName.Font = Enum.Font.Code
-thName.TextSize = 12
-thName.TextColor3 = Skeet.TextActive
-thName.TextXAlignment = Enum.TextXAlignment.Left
-thName.Text = "Target: None"
+thName.Size = UDim2.new(1, -12, 0, 18); thName.Position = UDim2.new(0, 6, 0, 4); thName.BackgroundTransparency = 1
+thName.Font = Enum.Font.Code; thName.TextSize = 12; thName.TextColor3 = Skeet.TextActive
+thName.TextXAlignment = Enum.TextXAlignment.Left; thName.Text = "Target: None"
 
 local thInfo = Instance.new("TextLabel", TargetHudFrame)
-thInfo.Size = UDim2.new(1, -12, 0, 14)
-thInfo.Position = UDim2.new(0, 6, 0, 21)
-thInfo.BackgroundTransparency = 1
-thInfo.Font = Enum.Font.Code
-thInfo.TextSize = 11
-thInfo.TextColor3 = Skeet.Text
-thInfo.TextXAlignment = Enum.TextXAlignment.Left
-thInfo.Text = "Role: Innocent | Dist: 0m"
+thInfo.Size = UDim2.new(1, -12, 0, 14); thInfo.Position = UDim2.new(0, 6, 0, 21); thInfo.BackgroundTransparency = 1
+thInfo.Font = Enum.Font.Code; thInfo.TextSize = 11; thInfo.TextColor3 = Skeet.Text
+thInfo.TextXAlignment = Enum.TextXAlignment.Left; thInfo.Text = "Role: Innocent | Dist: 0m"
 
 local thBarBg = Instance.new("Frame", TargetHudFrame)
-thBarBg.Size = UDim2.new(1, -12, 0, 7)
-thBarBg.Position = UDim2.new(0, 6, 0, 40)
-thBarBg.BackgroundColor3 = Skeet.ControlBg
-thBarBg.BorderColor3 = Skeet.ControlBorder
-thBarBg.BorderSizePixel = 1
+thBarBg.Size = UDim2.new(1, -12, 0, 7); thBarBg.Position = UDim2.new(0, 6, 0, 41)
+thBarBg.BackgroundColor3 = Skeet.ControlBg; thBarBg.BorderColor3 = Skeet.ControlBorder; thBarBg.BorderSizePixel = 1
 
 local thBarFill = Instance.new("Frame", thBarBg)
-thBarFill.Size = UDim2.new(1, 0, 1, 0)
-thBarFill.BackgroundColor3 = Skeet.Accent
-thBarFill.BorderSizePixel = 0
+thBarFill.Size = UDim2.new(1, 0, 1, 0); thBarFill.BackgroundColor3 = Skeet.Accent; thBarFill.BorderSizePixel = 0
+
+-------------------------------------------------------------------------
+-- 3D ВРАЩАЮЩИЕСЯ ОРБИТАЛЬНЫЕ СФЕРЫ (ORBITING AURA BALLS)
+-------------------------------------------------------------------------
+local OrbitFolder = GS.TrackInstance(Instance.new("Folder"))
+OrbitFolder.Name = "GS_OrbitSpheres"
+OrbitFolder.Parent = Workspace
+
+local OrbitBalls = {}
+for i = 1, 6 do
+    local ball = Instance.new("Part")
+    ball.Shape = Enum.PartType.Ball
+    ball.Size = Vector3.new(0.55, 0.55, 0.55)
+    ball.Anchored = true; ball.CanCollide = false; ball.CanTouch = false; ball.CanQuery = false; ball.CastShadow = false
+    ball.Material = Enum.Material.Neon
+    ball.Color = Skeet.Accent
+    ball.Transparency = 1
+    ball.Parent = OrbitFolder
+
+    local att0 = Instance.new("Attachment", ball)
+    att0.Position = Vector3.new(0, 0.2, 0)
+    local att1 = Instance.new("Attachment", ball)
+    att1.Position = Vector3.new(0, -0.2, 0)
+
+    local tr = Instance.new("Trail", ball)
+    tr.Attachment0 = att0
+    tr.Attachment1 = att1
+    tr.Lifetime = 0.35
+    tr.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
+    tr.Color = ColorSequence.new(Skeet.Accent)
+    tr.Enabled = false
+
+    OrbitBalls[i] = {Part = ball, Trail = tr}
+end
 
 -------------------------------------------------------------------------
 -- ВЕКТОРНЫЕ ИКОНКИ И МЕНЮ СКИТА 1:1
@@ -147,10 +253,8 @@ local function DrawVectorIcon(parent, iconType)
 
     local function Bar(x, y, w, h, rot, radius)
         local f = Instance.new("Frame", Canvas)
-        f.Size = UDim2.new(0, w, 0, h)
-        f.Position = UDim2.new(0, x, 0, y)
-        f.BackgroundColor3 = Skeet.IconIdle
-        f.BorderSizePixel = 0
+        f.Size = UDim2.new(0, w, 0, h); f.Position = UDim2.new(0, x, 0, y)
+        f.BackgroundColor3 = Skeet.IconIdle; f.BorderSizePixel = 0
         if rot then f.Rotation = rot end
         if radius then
             local c = Instance.new("UICorner", f)
@@ -162,14 +266,10 @@ local function DrawVectorIcon(parent, iconType)
 
     local function Ring(x, y, size, thick)
         local f = Instance.new("Frame", Canvas)
-        f.Size = UDim2.new(0, size, 0, size)
-        f.Position = UDim2.new(0, x, 0, y)
+        f.Size = UDim2.new(0, size, 0, size); f.Position = UDim2.new(0, x, 0, y)
         f.BackgroundTransparency = 1
-        local c = Instance.new("UICorner", f)
-        c.CornerRadius = UDim.new(1, 0)
-        local s = Instance.new("UIStroke", f)
-        s.Color = Skeet.IconIdle
-        s.Thickness = thick or 2
+        local c = Instance.new("UICorner", f); c.CornerRadius = UDim.new(1, 0)
+        local s = Instance.new("UIStroke", f); s.Color = Skeet.IconIdle; s.Thickness = thick or 2
         table.insert(Parts, s)
         return f
     end
@@ -210,21 +310,15 @@ OuterWindow.Draggable = true
 GS.OuterWindow = OuterWindow
 
 local MidBorder = Instance.new("Frame", OuterWindow)
-MidBorder.Size = UDim2.new(1, -4, 1, -4)
-MidBorder.Position = UDim2.new(0, 2, 0, 2)
-MidBorder.BackgroundColor3 = Skeet.InnerBorder
-MidBorder.BorderSizePixel = 0
+MidBorder.Size = UDim2.new(1, -4, 1, -4); MidBorder.Position = UDim2.new(0, 2, 0, 2)
+MidBorder.BackgroundColor3 = Skeet.InnerBorder; MidBorder.BorderSizePixel = 0
 
 local InnerWindow = Instance.new("Frame", MidBorder)
-InnerWindow.Size = UDim2.new(1, -2, 1, -2)
-InnerWindow.Position = UDim2.new(0, 1, 0, 1)
-InnerWindow.BackgroundColor3 = Skeet.MainBg
-InnerWindow.BorderSizePixel = 0
+InnerWindow.Size = UDim2.new(1, -2, 1, -2); InnerWindow.Position = UDim2.new(0, 1, 0, 1)
+InnerWindow.BackgroundColor3 = Skeet.MainBg; InnerWindow.BorderSizePixel = 0
 
 local RainbowBar = Instance.new("Frame", InnerWindow)
-RainbowBar.Size = UDim2.new(1, 0, 0, 2)
-RainbowBar.BackgroundColor3 = Color3.new(1, 1, 1)
-RainbowBar.BorderSizePixel = 0
+RainbowBar.Size = UDim2.new(1, 0, 0, 2); RainbowBar.BackgroundColor3 = Color3.new(1, 1, 1); RainbowBar.BorderSizePixel = 0
 local RainbowGrad = Instance.new("UIGradient", RainbowBar)
 RainbowGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0.00, Color3.fromRGB(55, 175, 225)),
@@ -233,20 +327,15 @@ RainbowGrad.Color = ColorSequence.new({
 })
 
 local Sidebar = Instance.new("Frame", InnerWindow)
-Sidebar.Size = UDim2.new(0, 64, 1, -2)
-Sidebar.Position = UDim2.new(0, 0, 0, 2)
-Sidebar.BackgroundColor3 = Skeet.SidebarBg
-Sidebar.BorderSizePixel = 0
+Sidebar.Size = UDim2.new(0, 64, 1, -2); Sidebar.Position = UDim2.new(0, 0, 0, 2)
+Sidebar.BackgroundColor3 = Skeet.SidebarBg; Sidebar.BorderSizePixel = 0
 
 local SidebarDivider = Instance.new("Frame", Sidebar)
-SidebarDivider.Size = UDim2.new(0, 1, 1, 0)
-SidebarDivider.Position = UDim2.new(1, -1, 0, 0)
-SidebarDivider.BackgroundColor3 = Skeet.GroupBorder
-SidebarDivider.BorderSizePixel = 0
+SidebarDivider.Size = UDim2.new(0, 1, 1, 0); SidebarDivider.Position = UDim2.new(1, -1, 0, 0)
+SidebarDivider.BackgroundColor3 = Skeet.GroupBorder; SidebarDivider.BorderSizePixel = 0
 
 local PagesArea = Instance.new("Frame", InnerWindow)
-PagesArea.Size = UDim2.new(1, -80, 1, -20)
-PagesArea.Position = UDim2.new(0, 72, 0, 12)
+PagesArea.Size = UDim2.new(1, -80, 1, -20); PagesArea.Position = UDim2.new(0, 72, 0, 12)
 PagesArea.BackgroundTransparency = 1
 
 local Tabs = {}
@@ -255,68 +344,42 @@ local FirstTab = true
 local function CreateSkeetTab(iconName)
     local idx = #Tabs
     local Btn = Instance.new("TextButton", Sidebar)
-    Btn.Size = UDim2.new(1, -1, 0, 56)
-    Btn.Position = UDim2.new(0, 0, 0, 8 + idx * 58)
+    Btn.Size = UDim2.new(1, -1, 0, 56); Btn.Position = UDim2.new(0, 0, 0, 8 + idx * 58)
     Btn.BackgroundColor3 = FirstTab and Skeet.MainBg or Skeet.SidebarBg
-    Btn.BorderSizePixel = 0
-    Btn.AutoButtonColor = false
-    Btn.Text = ""
+    Btn.BorderSizePixel = 0; Btn.AutoButtonColor = false; Btn.Text = ""
 
     local TopSelLine = Instance.new("Frame", Btn)
-    TopSelLine.Size = UDim2.new(1, 0, 0, 1)
-    TopSelLine.BackgroundColor3 = Skeet.GroupBorder
-    TopSelLine.BorderSizePixel = 0
-    TopSelLine.Visible = FirstTab
+    TopSelLine.Size = UDim2.new(1, 0, 0, 1); TopSelLine.BackgroundColor3 = Skeet.GroupBorder
+    TopSelLine.BorderSizePixel = 0; TopSelLine.Visible = FirstTab
 
     local BotSelLine = Instance.new("Frame", Btn)
-    BotSelLine.Size = UDim2.new(1, 0, 0, 1)
-    BotSelLine.Position = UDim2.new(0, 0, 1, -1)
-    BotSelLine.BackgroundColor3 = Skeet.GroupBorder
-    BotSelLine.BorderSizePixel = 0
-    BotSelLine.Visible = FirstTab
+    BotSelLine.Size = UDim2.new(1, 0, 0, 1); BotSelLine.Position = UDim2.new(0, 0, 1, -1)
+    BotSelLine.BackgroundColor3 = Skeet.GroupBorder; BotSelLine.BorderSizePixel = 0; BotSelLine.Visible = FirstTab
 
     local setIconActive = DrawVectorIcon(Btn, iconName)
     setIconActive(FirstTab)
 
     local Page = Instance.new("Frame", PagesArea)
-    Page.Size = UDim2.new(1, 0, 1, 0)
-    Page.BackgroundTransparency = 1
-    Page.Visible = FirstTab
+    Page.Size = UDim2.new(1, 0, 1, 0); Page.BackgroundTransparency = 1; Page.Visible = FirstTab
 
     local LeftCol = Instance.new("ScrollingFrame", Page)
-    LeftCol.Size = UDim2.new(0.485, 0, 1, 0)
-    LeftCol.BackgroundTransparency = 1
-    LeftCol.BorderSizePixel = 0
-    LeftCol.ScrollBarThickness = 0
-    LeftCol.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    LeftCol.CanvasSize = UDim2.new(0, 0, 0, 0)
-    local lList = Instance.new("UIListLayout", LeftCol)
-    lList.Padding = UDim.new(0, 12)
+    LeftCol.Size = UDim2.new(0.485, 0, 1, 0); LeftCol.BackgroundTransparency = 1; LeftCol.BorderSizePixel = 0
+    LeftCol.ScrollBarThickness = 0; LeftCol.AutomaticCanvasSize = Enum.AutomaticSize.Y; LeftCol.CanvasSize = UDim2.new(0, 0, 0, 0)
+    local lList = Instance.new("UIListLayout", LeftCol); lList.Padding = UDim.new(0, 12)
 
     local RightCol = Instance.new("ScrollingFrame", Page)
-    RightCol.Size = UDim2.new(0.485, 0, 1, 0)
-    RightCol.Position = UDim2.new(0.515, 0, 0, 0)
-    RightCol.BackgroundTransparency = 1
-    RightCol.BorderSizePixel = 0
-    RightCol.ScrollBarThickness = 0
-    RightCol.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    RightCol.CanvasSize = UDim2.new(0, 0, 0, 0)
-    local rList = Instance.new("UIListLayout", RightCol)
-    rList.Padding = UDim.new(0, 12)
+    RightCol.Size = UDim2.new(0.485, 0, 1, 0); RightCol.Position = UDim2.new(0.515, 0, 0, 0)
+    RightCol.BackgroundTransparency = 1; RightCol.BorderSizePixel = 0; RightCol.ScrollBarThickness = 0
+    RightCol.AutomaticCanvasSize = Enum.AutomaticSize.Y; RightCol.CanvasSize = UDim2.new(0, 0, 0, 0)
+    local rList = Instance.new("UIListLayout", RightCol); rList.Padding = UDim.new(0, 12)
 
     GS.TrackConnection(Btn.MouseButton1Click:Connect(function()
         for _, t in ipairs(Tabs) do
-            t.Page.Visible = false
-            t.Btn.BackgroundColor3 = Skeet.SidebarBg
-            t.Top.Visible = false
-            t.Bot.Visible = false
-            t.SetIcon(false)
+            t.Page.Visible = false; t.Btn.BackgroundColor3 = Skeet.SidebarBg
+            t.Top.Visible = false; t.Bot.Visible = false; t.SetIcon(false)
         end
-        Page.Visible = true
-        Btn.BackgroundColor3 = Skeet.MainBg
-        TopSelLine.Visible = true
-        BotSelLine.Visible = true
-        setIconActive(true)
+        Page.Visible = true; Btn.BackgroundColor3 = Skeet.MainBg
+        TopSelLine.Visible = true; BotSelLine.Visible = true; setIconActive(true)
     end))
 
     FirstTab = false
@@ -326,87 +389,54 @@ end
 
 local function CreateGroupbox(column, title)
     local Wrapper = Instance.new("Frame", column)
-    Wrapper.Size = UDim2.new(1, -2, 0, 40)
-    Wrapper.BackgroundTransparency = 1
-    Wrapper.AutomaticSize = Enum.AutomaticSize.Y
+    Wrapper.Size = UDim2.new(1, -2, 0, 40); Wrapper.BackgroundTransparency = 1; Wrapper.AutomaticSize = Enum.AutomaticSize.Y
 
     local Box = Instance.new("Frame", Wrapper)
-    Box.Size = UDim2.new(1, 0, 1, -6)
-    Box.Position = UDim2.new(0, 0, 0, 6)
-    Box.BackgroundColor3 = Skeet.GroupBg
-    Box.BorderColor3 = Skeet.GroupBorder
-    Box.BorderSizePixel = 1
+    Box.Size = UDim2.new(1, 0, 1, -6); Box.Position = UDim2.new(0, 0, 0, 6)
+    Box.BackgroundColor3 = Skeet.GroupBg; Box.BorderColor3 = Skeet.GroupBorder; Box.BorderSizePixel = 1
     Box.AutomaticSize = Enum.AutomaticSize.Y
 
     local TitleBg = Instance.new("Frame", Wrapper)
-    TitleBg.Position = UDim2.new(0, 10, 0, 0)
-    TitleBg.Size = UDim2.new(0, #title * 7 + 8, 0, 13)
-    TitleBg.BackgroundColor3 = Skeet.GroupBg
-    TitleBg.BorderSizePixel = 0
+    TitleBg.Position = UDim2.new(0, 10, 0, 0); TitleBg.Size = UDim2.new(0, #title * 7 + 8, 0, 13)
+    TitleBg.BackgroundColor3 = Skeet.GroupBg; TitleBg.BorderSizePixel = 0
 
     local TitleLbl = Instance.new("TextLabel", TitleBg)
-    TitleLbl.Size = UDim2.new(1, 0, 1, 0)
-    TitleLbl.BackgroundTransparency = 1
-    TitleLbl.Font = Enum.Font.SourceSansBold
-    TitleLbl.TextSize = 13
-    TitleLbl.TextColor3 = Skeet.TextActive
-    TitleLbl.Text = title
+    TitleLbl.Size = UDim2.new(1, 0, 1, 0); TitleLbl.BackgroundTransparency = 1
+    TitleLbl.Font = Enum.Font.SourceSansBold; TitleLbl.TextSize = 13; TitleLbl.TextColor3 = Skeet.TextActive; TitleLbl.Text = title
 
     local Content = Instance.new("Frame", Box)
-    Content.Size = UDim2.new(1, -24, 0, 10)
-    Content.Position = UDim2.new(0, 12, 0, 14)
-    Content.BackgroundTransparency = 1
-    Content.AutomaticSize = Enum.AutomaticSize.Y
+    Content.Size = UDim2.new(1, -24, 0, 10); Content.Position = UDim2.new(0, 12, 0, 14)
+    Content.BackgroundTransparency = 1; Content.AutomaticSize = Enum.AutomaticSize.Y
 
-    local cLayout = Instance.new("UIListLayout", Content)
-    cLayout.Padding = UDim.new(0, 5)
-
-    local Pad = Instance.new("UIPadding", Box)
-    Pad.PaddingBottom = UDim.new(0, 12)
-
+    local cLayout = Instance.new("UIListLayout", Content); cLayout.Padding = UDim.new(0, 5)
+    local Pad = Instance.new("UIPadding", Box); Pad.PaddingBottom = UDim.new(0, 12)
     return Content
 end
 
 local function RefreshAllUIControls()
-    for _, fn in ipairs(GS.UIUpdaters) do
-        pcall(fn)
-    end
+    for _, fn in ipairs(GS.UIUpdaters) do pcall(fn) end
 end
 
 local function AddCheckbox(group, label, key, hasBindTag)
     local Row = Instance.new("TextButton", group)
-    Row.Size = UDim2.new(1, 0, 0, 16)
-    Row.BackgroundTransparency = 1
-    Row.Text = ""
-    Row.AutoButtonColor = false
+    Row.Size = UDim2.new(1, 0, 0, 16); Row.BackgroundTransparency = 1; Row.Text = ""; Row.AutoButtonColor = false
 
     local Box = Instance.new("Frame", Row)
-    Box.Size = UDim2.new(0, 8, 0, 8)
-    Box.Position = UDim2.new(0, 0, 0.5, -4)
+    Box.Size = UDim2.new(0, 8, 0, 8); Box.Position = UDim2.new(0, 0, 0.5, -4)
     Box.BackgroundColor3 = Config[key] and Skeet.Accent or Skeet.ControlBg
-    Box.BorderColor3 = Skeet.ControlBorder
-    Box.BorderSizePixel = 1
+    Box.BorderColor3 = Skeet.ControlBorder; Box.BorderSizePixel = 1
 
     local Lbl = Instance.new("TextLabel", Row)
-    Lbl.Size = UDim2.new(1, -40, 1, 0)
-    Lbl.Position = UDim2.new(0, 18, 0, 0)
-    Lbl.BackgroundTransparency = 1
-    Lbl.Font = Enum.Font.SourceSans
-    Lbl.TextSize = 13
+    Lbl.Size = UDim2.new(1, -40, 1, 0); Lbl.Position = UDim2.new(0, 18, 0, 0); Lbl.BackgroundTransparency = 1
+    Lbl.Font = Enum.Font.SourceSans; Lbl.TextSize = 13
     Lbl.TextColor3 = Config[key] and Skeet.TextActive or Skeet.Text
-    Lbl.TextXAlignment = Enum.TextXAlignment.Left
-    Lbl.Text = label
+    Lbl.TextXAlignment = Enum.TextXAlignment.Left; Lbl.Text = label
 
     if hasBindTag then
         local BindTag = Instance.new("TextLabel", Row)
-        BindTag.Size = UDim2.new(0, 22, 1, 0)
-        BindTag.Position = UDim2.new(1, -22, 0, 0)
-        BindTag.BackgroundTransparency = 1
-        BindTag.Font = Enum.Font.Code
-        BindTag.TextSize = 10
-        BindTag.TextColor3 = Skeet.TextDim
-        BindTag.TextXAlignment = Enum.TextXAlignment.Right
-        BindTag.Text = "[-]"
+        BindTag.Size = UDim2.new(0, 22, 1, 0); BindTag.Position = UDim2.new(1, -22, 0, 0); BindTag.BackgroundTransparency = 1
+        BindTag.Font = Enum.Font.Code; BindTag.TextSize = 10; BindTag.TextColor3 = Skeet.TextDim
+        BindTag.TextXAlignment = Enum.TextXAlignment.Right; BindTag.Text = "[-]"
     end
 
     local function sync()
@@ -427,49 +457,31 @@ end
 local function AddSlider(group, label, key, minVal, maxVal, suffix)
     suffix = suffix or ""
     local Wrap = Instance.new("Frame", group)
-    Wrap.Size = UDim2.new(1, 0, 0, 28)
-    Wrap.BackgroundTransparency = 1
+    Wrap.Size = UDim2.new(1, 0, 0, 28); Wrap.BackgroundTransparency = 1
 
     local Lbl = Instance.new("TextLabel", Wrap)
-    Lbl.Size = UDim2.new(1, -18, 0, 14)
-    Lbl.Position = UDim2.new(0, 18, 0, 0)
-    Lbl.BackgroundTransparency = 1
-    Lbl.Font = Enum.Font.SourceSans
-    Lbl.TextSize = 13
-    Lbl.TextColor3 = Skeet.Text
-    Lbl.TextXAlignment = Enum.TextXAlignment.Left
-    Lbl.Text = label
+    Lbl.Size = UDim2.new(1, -18, 0, 14); Lbl.Position = UDim2.new(0, 18, 0, 0); Lbl.BackgroundTransparency = 1
+    Lbl.Font = Enum.Font.SourceSans; Lbl.TextSize = 13; Lbl.TextColor3 = Skeet.Text
+    Lbl.TextXAlignment = Enum.TextXAlignment.Left; Lbl.Text = label
 
     local Bar = Instance.new("TextButton", Wrap)
-    Bar.Size = UDim2.new(1, -36, 0, 7)
-    Bar.Position = UDim2.new(0, 18, 0, 16)
-    Bar.BackgroundColor3 = Skeet.ControlBg
-    Bar.BorderColor3 = Skeet.ControlBorder
-    Bar.BorderSizePixel = 1
-    Bar.AutoButtonColor = false
-    Bar.Text = ""
+    Bar.Size = UDim2.new(1, -36, 0, 7); Bar.Position = UDim2.new(0, 18, 0, 16)
+    Bar.BackgroundColor3 = Skeet.ControlBg; Bar.BorderColor3 = Skeet.ControlBorder
+    Bar.BorderSizePixel = 1; Bar.AutoButtonColor = false; Bar.Text = ""
 
     local Fill = Instance.new("Frame", Bar)
     local pct = math.clamp((Config[key] - minVal) / (maxVal - minVal), 0, 1)
-    Fill.Size = UDim2.new(pct, 0, 1, 0)
-    Fill.BackgroundColor3 = Skeet.Accent
-    Fill.BorderSizePixel = 0
+    Fill.Size = UDim2.new(pct, 0, 1, 0); Fill.BackgroundColor3 = Skeet.Accent; Fill.BorderSizePixel = 0
 
     local ValText = Instance.new("TextLabel", Bar)
-    ValText.Size = UDim2.new(0, 50, 0, 14)
-    ValText.AnchorPoint = Vector2.new(0.5, 0.5)
-    ValText.Position = UDim2.new(pct, 0, 0.5, 1)
-    ValText.BackgroundTransparency = 1
-    ValText.Font = Enum.Font.SourceSansBold
-    ValText.TextSize = 12
-    ValText.TextColor3 = Skeet.TextActive
-    ValText.TextStrokeTransparency = 0
-    ValText.Text = tostring(Config[key]) .. suffix
+    ValText.Size = UDim2.new(0, 50, 0, 14); ValText.AnchorPoint = Vector2.new(0.5, 0.5)
+    ValText.Position = UDim2.new(pct, 0, 0.5, 1); ValText.BackgroundTransparency = 1
+    ValText.Font = Enum.Font.SourceSansBold; ValText.TextSize = 12; ValText.TextColor3 = Skeet.TextActive
+    ValText.TextStrokeTransparency = 0; ValText.Text = tostring(Config[key]) .. suffix
 
     local function sync()
         local r = math.clamp((Config[key] - minVal) / (maxVal - minVal), 0, 1)
-        Fill.Size = UDim2.new(r, 0, 1, 0)
-        ValText.Position = UDim2.new(r, 0, 0.5, 1)
+        Fill.Size = UDim2.new(r, 0, 1, 0); ValText.Position = UDim2.new(r, 0, 0.5, 1)
         ValText.Text = tostring(Config[key]) .. suffix
     end
     table.insert(GS.UIUpdaters, sync)
@@ -478,8 +490,7 @@ local function AddSlider(group, label, key, minVal, maxVal, suffix)
     local function update(input)
         local rel = math.clamp((input.Position.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
         local val = math.floor(minVal + (maxVal - minVal) * rel)
-        Config[key] = val
-        sync()
+        Config[key] = val; sync()
     end
 
     GS.TrackConnection(Bar.InputBegan:Connect(function(inp)
@@ -495,50 +506,28 @@ end
 
 local function AddDropdown(group, label, key, options)
     local Wrap = Instance.new("Frame", group)
-    Wrap.Size = UDim2.new(1, 0, 0, 36)
-    Wrap.BackgroundTransparency = 1
+    Wrap.Size = UDim2.new(1, 0, 0, 36); Wrap.BackgroundTransparency = 1
 
     local Lbl = Instance.new("TextLabel", Wrap)
-    Lbl.Size = UDim2.new(1, -18, 0, 14)
-    Lbl.Position = UDim2.new(0, 18, 0, 0)
-    Lbl.BackgroundTransparency = 1
-    Lbl.Font = Enum.Font.SourceSans
-    Lbl.TextSize = 13
-    Lbl.TextColor3 = Skeet.Text
-    Lbl.TextXAlignment = Enum.TextXAlignment.Left
-    Lbl.Text = label
+    Lbl.Size = UDim2.new(1, -18, 0, 14); Lbl.Position = UDim2.new(0, 18, 0, 0); Lbl.BackgroundTransparency = 1
+    Lbl.Font = Enum.Font.SourceSans; Lbl.TextSize = 13; Lbl.TextColor3 = Skeet.Text
+    Lbl.TextXAlignment = Enum.TextXAlignment.Left; Lbl.Text = label
 
     local DropBtn = Instance.new("TextButton", Wrap)
-    DropBtn.Size = UDim2.new(1, -36, 0, 18)
-    DropBtn.Position = UDim2.new(0, 18, 0, 16)
-    DropBtn.BackgroundColor3 = Skeet.ControlBg
-    DropBtn.BorderColor3 = Skeet.ControlBorder
-    DropBtn.BorderSizePixel = 1
-    DropBtn.AutoButtonColor = false
-    DropBtn.Text = ""
+    DropBtn.Size = UDim2.new(1, -36, 0, 18); DropBtn.Position = UDim2.new(0, 18, 0, 16)
+    DropBtn.BackgroundColor3 = Skeet.ControlBg; DropBtn.BorderColor3 = Skeet.ControlBorder
+    DropBtn.BorderSizePixel = 1; DropBtn.AutoButtonColor = false; DropBtn.Text = ""
 
     local ValLbl = Instance.new("TextLabel", DropBtn)
-    ValLbl.Size = UDim2.new(1, -20, 1, 0)
-    ValLbl.Position = UDim2.new(0, 6, 0, 0)
-    ValLbl.BackgroundTransparency = 1
-    ValLbl.Font = Enum.Font.SourceSans
-    ValLbl.TextSize = 13
-    ValLbl.TextColor3 = Skeet.Text
-    ValLbl.TextXAlignment = Enum.TextXAlignment.Left
-    ValLbl.Text = tostring(Config[key])
+    ValLbl.Size = UDim2.new(1, -20, 1, 0); ValLbl.Position = UDim2.new(0, 6, 0, 0); ValLbl.BackgroundTransparency = 1
+    ValLbl.Font = Enum.Font.SourceSans; ValLbl.TextSize = 13; ValLbl.TextColor3 = Skeet.Text
+    ValLbl.TextXAlignment = Enum.TextXAlignment.Left; ValLbl.Text = tostring(Config[key])
 
     local Arrow = Instance.new("TextLabel", DropBtn)
-    Arrow.Size = UDim2.new(0, 14, 1, 0)
-    Arrow.Position = UDim2.new(1, -14, 0, 0)
-    Arrow.BackgroundTransparency = 1
-    Arrow.Font = Enum.Font.SourceSansBold
-    Arrow.TextSize = 10
-    Arrow.TextColor3 = Skeet.TextDim
-    Arrow.Text = "v"
+    Arrow.Size = UDim2.new(0, 14, 1, 0); Arrow.Position = UDim2.new(1, -14, 0, 0); Arrow.BackgroundTransparency = 1
+    Arrow.Font = Enum.Font.SourceSansBold; Arrow.TextSize = 10; Arrow.TextColor3 = Skeet.TextDim; Arrow.Text = "v"
 
-    local function sync()
-        ValLbl.Text = tostring(Config[key])
-    end
+    local function sync() ValLbl.Text = tostring(Config[key]) end
     table.insert(GS.UIUpdaters, sync)
 
     GS.TrackConnection(DropBtn.MouseButton1Click:Connect(function()
@@ -552,19 +541,13 @@ end
 
 local function AddButton(group, label, callback, customTextColor)
     local Wrap = Instance.new("Frame", group)
-    Wrap.Size = UDim2.new(1, 0, 0, 22)
-    Wrap.BackgroundTransparency = 1
+    Wrap.Size = UDim2.new(1, 0, 0, 22); Wrap.BackgroundTransparency = 1
 
     local Btn = Instance.new("TextButton", Wrap)
-    Btn.Size = UDim2.new(1, -36, 0, 20)
-    Btn.Position = UDim2.new(0, 18, 0, 1)
-    Btn.BackgroundColor3 = Skeet.ControlBg
-    Btn.BorderColor3 = Skeet.ControlBorder
-    Btn.BorderSizePixel = 1
-    Btn.Font = Enum.Font.SourceSansBold
-    Btn.TextSize = 13
-    Btn.TextColor3 = customTextColor or Skeet.TextActive
-    Btn.Text = label
+    Btn.Size = UDim2.new(1, -36, 0, 20); Btn.Position = UDim2.new(0, 18, 0, 1)
+    Btn.BackgroundColor3 = Skeet.ControlBg; Btn.BorderColor3 = Skeet.ControlBorder; Btn.BorderSizePixel = 1
+    Btn.Font = Enum.Font.SourceSansBold; Btn.TextSize = 13
+    Btn.TextColor3 = customTextColor or Skeet.TextActive; Btn.Text = label
     GS.TrackConnection(Btn.MouseButton1Click:Connect(callback))
 end
 
@@ -581,10 +564,10 @@ local PL_L, PL_R = CreateSkeetTab("Players")
 local CF_L, CF_R = CreateSkeetTab("Config")
 
 -- ВКЛАДКА 1: RAGEBOT & SILENT AIM
-local gAimbot = CreateGroupbox(R_L, "Aimbot (3-Layer MM2 Hook)")
+local gAimbot = CreateGroupbox(R_L, "Aimbot (Universal MM2 Hook)")
 AddCheckbox(gAimbot, "Enabled (Silent Aim)", "SilentAim", true)
 AddCheckbox(gAimbot, "Direct CreateBeam invoke on click", "DirectClickInvoke", false)
-AddCheckbox(gAimbot, "Fix Sheriff low bullet (GuiInset Fix)", "FixBulletDrop", false)
+AddCheckbox(gAimbot, "Fix Sheriff low bullet (0px Ray Fix)", "FixBulletDrop", false)
 AddDropdown(gAimbot, "Target role priority", "TargetRolePriority", {"Smart (Role-Based)", "Any Closest", "Murderer Only"})
 AddDropdown(gAimbot, "Target hitbox", "HitPart", {"HumanoidRootPart", "Head", "UpperTorso", "LowerTorso"})
 AddCheckbox(gAimbot, "Automatic fire (Sheriff)", "AutoFire", true)
@@ -661,31 +644,41 @@ AddSlider(gLegitAim, "Backtrack window", "BacktrackMS", 50, 400, "ms")
 AddCheckbox(gLegitAim, "Legit Hitbox Expander", "HitboxExpander", false)
 AddSlider(gLegitAim, "Expanded hitbox size", "HitboxSize", 3, 20, "st")
 
--- ВКЛАДКА 4: ДОРОГИЕ ВИЗУАЛЫ (PRO SKEET ESP)
-local gPlayerESP = CreateGroupbox(VS_L, "Player ESP (Pro Skeet)")
+-- ВКЛАДКА 4: ФОРУМНЫЕ ВИЗУАЛЫ (BLISSFUL 3D BOX + EXUNYS + SKEET INDICATORS)
+local gPlayerESP = CreateGroupbox(VS_L, "Player ESP (Forum Pack)")
 AddCheckbox(gPlayerESP, "Enabled", "ESP_Enabled", false)
 AddCheckbox(gPlayerESP, "Bounding box", "ESP_Box", false)
-AddDropdown(gPlayerESP, "Box style", "ESP_BoxStyle", {"Corner", "Full"})
+AddDropdown(gPlayerESP, "Box mode (2D / Corner / 3D Cube)", "ESP_BoxStyle", {"Corner", "Full 2D", "3D Box (12 Lines)"})
 AddCheckbox(gPlayerESP, "Dark translucent box fill", "ESP_BoxFill", false)
-AddCheckbox(gPlayerESP, "Health bar", "ESP_HealthBar", false)
-AddCheckbox(gPlayerESP, "Name", "ESP_Name", false)
-AddCheckbox(gPlayerESP, "Role & Weapon flags", "ESP_Flags", false)
-AddCheckbox(gPlayerESP, "Distance", "ESP_Distance", false)
-AddCheckbox(gPlayerESP, "Skeleton (Bone ESP)", "ESP_Skeleton", false)
+AddCheckbox(gPlayerESP, "Health bar + HP value", "ESP_HealthBar", false)
+AddCheckbox(gPlayerESP, "Name tag", "ESP_Name", false)
+AddCheckbox(gPlayerESP, "Role & Equipped weapon flag", "ESP_Flags", false)
+AddCheckbox(gPlayerESP, "Distance tag", "ESP_Distance", false)
+AddCheckbox(gPlayerESP, "Skeleton (Universal Bone ESP)", "ESP_Skeleton", false)
+AddCheckbox(gPlayerESP, "Head Dot ESP", "ESP_HeadDot", false)
+AddCheckbox(gPlayerESP, "3D View Barrel (Look Laser)", "ESP_LookLaser", false)
+AddCheckbox(gPlayerESP, "Snapline Tracers to enemies", "ESP_Tracers", false)
+AddDropdown(gPlayerESP, "Tracer origin", "ESP_TracerOrigin", {"Bottom", "Center", "Mouse"})
 AddCheckbox(gPlayerESP, "Out of FOV arrows", "ESP_OOFArrows", false)
 AddSlider(gPlayerESP, "OOF arrow radius", "ESP_OOFRadius", 60, 320, "px")
 AddCheckbox(gPlayerESP, "Colored models (Chams)", "Chams", false)
 AddSlider(gPlayerESP, "Chams transparency", "ChamsAlpha", 0, 95, "%")
 
-local gTacticalVis = CreateGroupbox(VS_L, "Radar & Tactical Overlays")
+local gTacticalVis = CreateGroupbox(VS_L, "Skeet Indicators, Radar & Self")
+AddCheckbox(gTacticalVis, "Skeet Crosshair Indicators (DT/FAKE/WALL)", "SkeetIndicators", false)
+AddCheckbox(gTacticalVis, "Velocity Speedometer + Live Graph", "VelocityGraph", false)
+AddCheckbox(gTacticalVis, "Spectator & Dead Players List", "SpectatorList", false)
 AddCheckbox(gTacticalVis, "2D Minimap Radar", "Radar2D", false)
 AddSlider(gTacticalVis, "Radar zoom scale", "RadarZoom", 6, 40, "x")
 AddCheckbox(gTacticalVis, "Target HUD card", "TargetHUD", false)
+AddCheckbox(gTacticalVis, "3D Orbiting Neon Spheres (Self Aura)", "OrbitSpheres", false)
+AddSlider(gTacticalVis, "Orbit spheres count", "OrbitCount", 1, 6, "")
+AddSlider(gTacticalVis, "Orbit speed", "OrbitSpeed", 1, 12, "x")
 AddCheckbox(gTacticalVis, "Murderer 3D danger ring", "MurdererDangerRing", false)
 AddCheckbox(gTacticalVis, "3D Floating damage numbers", "FloatingDamage", false)
 AddCheckbox(gTacticalVis, "3D Floating Head Halo", "HaloRing", false)
 AddCheckbox(gTacticalVis, "3D China Hat", "ChinaHat", false)
-AddCheckbox(gTacticalVis, "3D Jump & landing circles", "JumpCircles", false)
+AddDropdown(gTacticalVis, "China Hat & Aura color", "ChinaHatColor", {"Skeet Green", "Cyan", "Purple", "Rainbow"})
 
 local gScope = CreateGroupbox(VS_R, "Custom Scope (Pixel-Perfect)")
 AddCheckbox(gScope, "Enable Custom Scope (Skeet)", "CustomScope", true)
@@ -700,7 +693,7 @@ AddCheckbox(gScope, "Center dot", "ScopeCenterDot", false)
 AddCheckbox(gScope, "RMB Scope Zoom [RightClick]", "ScopeZoomRMB", true)
 AddSlider(gScope, "Scope Zoom FOV", "ScopeZoomFOV", 20, 75, "°")
 
-local gWorldESP = CreateGroupbox(VS_R, "World & Hit Effects")
+local gWorldESP = CreateGroupbox(VS_R, "World, Camera & Hit Effects")
 AddCheckbox(gWorldESP, "Dropped gun ESP", "ESP_GunDrop", false)
 AddCheckbox(gWorldESP, "Coin container ESP", "ESP_Coins", false)
 AddCheckbox(gWorldESP, "Hit chams (On-shot skeleton)", "HitChams", false)
@@ -710,6 +703,7 @@ AddCheckbox(gWorldESP, "Hit marker & Sound", "HitSound", false)
 AddDropdown(gWorldESP, "Sound type", "SoundType", {"Skeet", "Neverlose", "Rust", "Bell"})
 AddCheckbox(gWorldESP, "World ambience tint", "WorldAmbience", false)
 AddDropdown(gWorldESP, "Ambience palette", "WorldTintMode", {"Midnight Purple", "Skeet Green", "Cyber Cyan", "Crimson"})
+AddCheckbox(gWorldESP, "Neon Bloom glow effect", "WorldBloom", false)
 AddSlider(gWorldESP, "Color saturation boost", "ColorSaturation", 0, 100, "%")
 AddCheckbox(gWorldESP, "Force thirdperson zoom", "ThirdPerson", true)
 AddSlider(gWorldESP, "Thirdperson distance", "ThirdPersonDist", 8, 45, "st")
@@ -814,15 +808,10 @@ end)
 -- ВКЛАДКА 7: ИГРОКИ
 local gPlrInfo = CreateGroupbox(PL_L, "Round Scanner")
 local RoleStatusLbl = Instance.new("TextLabel", gPlrInfo)
-RoleStatusLbl.Size = UDim2.new(1, -18, 0, 44)
-RoleStatusLbl.Position = UDim2.new(0, 18, 0, 0)
-RoleStatusLbl.BackgroundTransparency = 1
-RoleStatusLbl.Font = Enum.Font.Code
-RoleStatusLbl.TextSize = 12
-RoleStatusLbl.TextColor3 = Skeet.Text
-RoleStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
-RoleStatusLbl.TextYAlignment = Enum.TextYAlignment.Top
-RoleStatusLbl.Text = "Murderer: Scanning...\nSheriff: Scanning..."
+RoleStatusLbl.Size = UDim2.new(1, -18, 0, 44); RoleStatusLbl.Position = UDim2.new(0, 18, 0, 0)
+RoleStatusLbl.BackgroundTransparency = 1; RoleStatusLbl.Font = Enum.Font.Code; RoleStatusLbl.TextSize = 12
+RoleStatusLbl.TextColor3 = Skeet.Text; RoleStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+RoleStatusLbl.TextYAlignment = Enum.TextYAlignment.Top; RoleStatusLbl.Text = "Murderer: Scanning...\nSheriff: Scanning..."
 
 local gPlrTp = CreateGroupbox(PL_R, "Role Teleports")
 AddButton(gPlrTp, "Teleport to Murderer", function()
@@ -855,21 +844,13 @@ end
 
 local gCfgSys = CreateGroupbox(CF_L, "Presets & Configs")
 AddDropdown(gCfgSys, "Configuration slot", "SelectedConfigSlot", {
-    "Slot 1 (Rage)",
-    "Slot 2 (HvH Desync)",
-    "Slot 3 (Legit Sheriff)",
-    "Slot 4 (Murderer Pro)",
-    "Slot 5 (Custom)"
+    "Slot 1 (Rage)", "Slot 2 (HvH Desync)", "Slot 3 (Legit Sheriff)", "Slot 4 (Murderer Pro)", "Slot 5 (Custom)"
 })
 
 local ConfigStatusLbl = Instance.new("TextLabel", gCfgSys)
-ConfigStatusLbl.Size = UDim2.new(1, -18, 0, 16)
-ConfigStatusLbl.Position = UDim2.new(0, 18, 0, 0)
-ConfigStatusLbl.BackgroundTransparency = 1
-ConfigStatusLbl.Font = Enum.Font.Code
-ConfigStatusLbl.TextSize = 11
-ConfigStatusLbl.TextColor3 = Skeet.Accent
-ConfigStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+ConfigStatusLbl.Size = UDim2.new(1, -18, 0, 16); ConfigStatusLbl.Position = UDim2.new(0, 18, 0, 0)
+ConfigStatusLbl.BackgroundTransparency = 1; ConfigStatusLbl.Font = Enum.Font.Code; ConfigStatusLbl.TextSize = 11
+ConfigStatusLbl.TextColor3 = Skeet.Accent; ConfigStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
 ConfigStatusLbl.Text = "Status: Ready"
 
 AddButton(gCfgSys, "Save config", function()
@@ -947,105 +928,52 @@ AddCheckbox(gUnload, "Keybind list", "KeybindList", false)
 AddButton(gUnload, "UNHOOK / UNLOAD [END]", GS.FullUnhook, Skeet.Danger)
 
 local SidebarUnhookBtn = Instance.new("TextButton", Sidebar)
-SidebarUnhookBtn.Size = UDim2.new(1, -9, 0, 22)
-SidebarUnhookBtn.Position = UDim2.new(0, 4, 1, -28)
-SidebarUnhookBtn.BackgroundColor3 = Skeet.ControlBg
-SidebarUnhookBtn.BorderColor3 = Skeet.Danger
-SidebarUnhookBtn.BorderSizePixel = 1
-SidebarUnhookBtn.Font = Enum.Font.Code
-SidebarUnhookBtn.TextSize = 10
-SidebarUnhookBtn.TextColor3 = Skeet.Danger
-SidebarUnhookBtn.Text = "UNHOOK"
+SidebarUnhookBtn.Size = UDim2.new(1, -9, 0, 22); SidebarUnhookBtn.Position = UDim2.new(0, 4, 1, -28)
+SidebarUnhookBtn.BackgroundColor3 = Skeet.ControlBg; SidebarUnhookBtn.BorderColor3 = Skeet.Danger; SidebarUnhookBtn.BorderSizePixel = 1
+SidebarUnhookBtn.Font = Enum.Font.Code; SidebarUnhookBtn.TextSize = 10; SidebarUnhookBtn.TextColor3 = Skeet.Danger; SidebarUnhookBtn.Text = "UNHOOK"
 GS.TrackConnection(SidebarUnhookBtn.MouseButton1Click:Connect(GS.FullUnhook))
 
 -------------------------------------------------------------------------
 -- ВОТЕРМАРКА, КЕЙБИНДЫ, СТРЕЛКИ И 3D МОДЕЛИ (GHOST, BACKTRACK)
 -------------------------------------------------------------------------
 local Watermark = Instance.new("Frame", ScreenGui)
-Watermark.Size = UDim2.new(0, 310, 0, 22)
-Watermark.Position = UDim2.new(1, -322, 0, 12)
-Watermark.BackgroundColor3 = Skeet.MainBg
-Watermark.BorderColor3 = Skeet.GroupBorder
-Watermark.BorderSizePixel = 1
+Watermark.Size = UDim2.new(0, 310, 0, 22); Watermark.Position = UDim2.new(1, -322, 0, 12)
+Watermark.BackgroundColor3 = Skeet.MainBg; Watermark.BorderColor3 = Skeet.GroupBorder; Watermark.BorderSizePixel = 1
 local wmBar = Instance.new("Frame", Watermark)
-wmBar.Size = UDim2.new(1, 0, 0, 2)
-wmBar.BackgroundColor3 = Skeet.Accent
-wmBar.BorderSizePixel = 0
+wmBar.Size = UDim2.new(1, 0, 0, 2); wmBar.BackgroundColor3 = Skeet.Accent; wmBar.BorderSizePixel = 0
 local wmTxt = Instance.new("TextLabel", Watermark)
-wmTxt.Size = UDim2.new(1, -10, 1, -2)
-wmTxt.Position = UDim2.new(0, 5, 0, 2)
-wmTxt.BackgroundTransparency = 1
-wmTxt.Font = Enum.Font.Code
-wmTxt.TextSize = 11
-wmTxt.TextColor3 = Skeet.TextActive
-wmTxt.Text = "gamesense | mm2 | 60 fps"
+wmTxt.Size = UDim2.new(1, -10, 1, -2); wmTxt.Position = UDim2.new(0, 5, 0, 2); wmTxt.BackgroundTransparency = 1
+wmTxt.Font = Enum.Font.Code; wmTxt.TextSize = 11; wmTxt.TextColor3 = Skeet.TextActive; wmTxt.Text = "gamesense | mm2 | 60 fps"
 
 local KeybindBox = Instance.new("Frame", ScreenGui)
-KeybindBox.Size = UDim2.new(0, 185, 0, 24)
-KeybindBox.Position = UDim2.new(0, 14, 0.44, 0)
-KeybindBox.BackgroundColor3 = Skeet.MainBg
-KeybindBox.BorderColor3 = Skeet.GroupBorder
-KeybindBox.BorderSizePixel = 1
+KeybindBox.Size = UDim2.new(0, 185, 0, 24); KeybindBox.Position = UDim2.new(0, 14, 0.44, 0)
+KeybindBox.BackgroundColor3 = Skeet.MainBg; KeybindBox.BorderColor3 = Skeet.GroupBorder; KeybindBox.BorderSizePixel = 1
 KeybindBox.AutomaticSize = Enum.AutomaticSize.Y
 local kbBar = Instance.new("Frame", KeybindBox)
-kbBar.Size = UDim2.new(1, 0, 0, 2)
-kbBar.BackgroundColor3 = Skeet.Accent
-kbBar.BorderSizePixel = 0
+kbBar.Size = UDim2.new(1, 0, 0, 2); kbBar.BackgroundColor3 = Skeet.Accent; kbBar.BorderSizePixel = 0
 local kbHdr = Instance.new("TextLabel", KeybindBox)
-kbHdr.Size = UDim2.new(1, 0, 0, 18)
-kbHdr.Position = UDim2.new(0, 0, 0, 2)
-kbHdr.BackgroundTransparency = 1
-kbHdr.Font = Enum.Font.Code
-kbHdr.TextSize = 11
-kbHdr.TextColor3 = Skeet.TextActive
-kbHdr.Text = "Keybinds"
+kbHdr.Size = UDim2.new(1, 0, 0, 18); kbHdr.Position = UDim2.new(0, 0, 0, 2); kbHdr.BackgroundTransparency = 1
+kbHdr.Font = Enum.Font.Code; kbHdr.TextSize = 11; kbHdr.TextColor3 = Skeet.TextActive; kbHdr.Text = "Keybinds"
 local kbBody = Instance.new("TextLabel", KeybindBox)
-kbBody.Size = UDim2.new(1, -12, 0, 14)
-kbBody.Position = UDim2.new(0, 6, 0, 20)
-kbBody.BackgroundTransparency = 1
-kbBody.Font = Enum.Font.Code
-kbBody.TextSize = 11
-kbBody.TextColor3 = Skeet.Text
-kbBody.TextXAlignment = Enum.TextXAlignment.Left
-kbBody.TextYAlignment = Enum.TextYAlignment.Top
+kbBody.Size = UDim2.new(1, -12, 0, 14); kbBody.Position = UDim2.new(0, 6, 0, 20); kbBody.BackgroundTransparency = 1
+kbBody.Font = Enum.Font.Code; kbBody.TextSize = 11; kbBody.TextColor3 = Skeet.Text
+kbBody.TextXAlignment = Enum.TextXAlignment.Left; kbBody.TextYAlignment = Enum.TextYAlignment.Top
 kbBody.AutomaticSize = Enum.AutomaticSize.Y
 
 local ArrowLeft = Instance.new("TextLabel", ScreenGui)
-ArrowLeft.Size = UDim2.new(0, 30, 0, 30)
-ArrowLeft.Position = UDim2.new(0.5, -55, 0.5, -15)
-ArrowLeft.BackgroundTransparency = 1
-ArrowLeft.Font = Enum.Font.SourceSansBold
-ArrowLeft.TextSize = 24
-ArrowLeft.TextColor3 = Skeet.TextDim
-ArrowLeft.TextStrokeTransparency = 0.2
-ArrowLeft.Text = "<"
-ArrowLeft.Visible = false
+ArrowLeft.Size = UDim2.new(0, 30, 0, 30); ArrowLeft.Position = UDim2.new(0.5, -55, 0.5, -15); ArrowLeft.BackgroundTransparency = 1
+ArrowLeft.Font = Enum.Font.SourceSansBold; ArrowLeft.TextSize = 24; ArrowLeft.TextColor3 = Skeet.TextDim; ArrowLeft.TextStrokeTransparency = 0.2; ArrowLeft.Text = "<"; ArrowLeft.Visible = false
 
 local ArrowRight = Instance.new("TextLabel", ScreenGui)
-ArrowRight.Size = UDim2.new(0, 30, 0, 30)
-ArrowRight.Position = UDim2.new(0.5, 25, 0.5, -15)
-ArrowRight.BackgroundTransparency = 1
-ArrowRight.Font = Enum.Font.SourceSansBold
-ArrowRight.TextSize = 24
-ArrowRight.TextColor3 = Skeet.TextDim
-ArrowRight.TextStrokeTransparency = 0.2
-ArrowRight.Text = ">"
-ArrowRight.Visible = false
+ArrowRight.Size = UDim2.new(0, 30, 0, 30); ArrowRight.Position = UDim2.new(0.5, 25, 0.5, -15); ArrowRight.BackgroundTransparency = 1
+ArrowRight.Font = Enum.Font.SourceSansBold; ArrowRight.TextSize = 24; ArrowRight.TextColor3 = Skeet.TextDim; ArrowRight.TextStrokeTransparency = 0.2; ArrowRight.Text = ">"; ArrowRight.Visible = false
 
 local ArrowDown = Instance.new("TextLabel", ScreenGui)
-ArrowDown.Size = UDim2.new(0, 30, 0, 30)
-ArrowDown.Position = UDim2.new(0.5, -15, 0.5, 25)
-ArrowDown.BackgroundTransparency = 1
-ArrowDown.Font = Enum.Font.SourceSansBold
-ArrowDown.TextSize = 20
-ArrowDown.TextColor3 = Skeet.TextDim
-ArrowDown.TextStrokeTransparency = 0.2
-ArrowDown.Text = "v"
-ArrowDown.Visible = false
+ArrowDown.Size = UDim2.new(0, 30, 0, 30); ArrowDown.Position = UDim2.new(0.5, -15, 0.5, 25); ArrowDown.BackgroundTransparency = 1
+ArrowDown.Font = Enum.Font.SourceSansBold; ArrowDown.TextSize = 20; ArrowDown.TextColor3 = Skeet.TextDim; ArrowDown.TextStrokeTransparency = 0.2; ArrowDown.Text = "v"; ArrowDown.Visible = false
 
 local GhostModel = GS.TrackInstance(Instance.new("Model"))
-GhostModel.Name = "GS_DesyncClone"
-GhostModel.Parent = Workspace
+GhostModel.Name = "GS_DesyncClone"; GhostModel.Parent = Workspace
 GS.GhostModel = GhostModel
 
 local GhostParts = {}
@@ -1057,12 +985,9 @@ local function RebuildGhostModel()
     for _, part in ipairs(char:GetChildren()) do
         if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
             local clone = Instance.new("Part")
-            clone.Name = part.Name
-            clone.Size = part.Size
+            clone.Name = part.Name; clone.Size = part.Size
             clone.Anchored = true; clone.CanCollide = false; clone.CanTouch = false; clone.CanQuery = false; clone.CastShadow = false
-            clone.Material = Enum.Material.ForceField
-            clone.Color = Skeet.Accent
-            clone.Transparency = 1
+            clone.Material = Enum.Material.ForceField; clone.Color = Skeet.Accent; clone.Transparency = 1
             clone.Parent = GhostModel
             GhostParts[part.Name] = clone
         end
@@ -1077,10 +1002,7 @@ end))
 local BacktrackGhost = GS.TrackInstance(Instance.new("Part"))
 BacktrackGhost.Name = "GS_BacktrackGhost"
 BacktrackGhost.Anchored = true; BacktrackGhost.CanCollide = false; BacktrackGhost.CanTouch = false; BacktrackGhost.CanQuery = false; BacktrackGhost.CastShadow = false
-BacktrackGhost.Size = Vector3.new(2, 4.5, 1)
-BacktrackGhost.Material = Enum.Material.ForceField
-BacktrackGhost.Color = Skeet.Cyan
-BacktrackGhost.Transparency = 1
+BacktrackGhost.Size = Vector3.new(2, 4.5, 1); BacktrackGhost.Material = Enum.Material.ForceField; BacktrackGhost.Color = Skeet.Cyan; BacktrackGhost.Transparency = 1
 BacktrackGhost.Parent = Workspace
 GS.BacktrackGhost = BacktrackGhost
 
@@ -1127,6 +1049,13 @@ local BonePairsR6 = {
     {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
 }
 
+-- 12 рёбер 3D-куба (Blissful4992 3D Box ESP)
+local CubeEdges = {
+    {1, 2}, {2, 3}, {3, 4}, {4, 1}, -- Верхняя грань
+    {5, 6}, {6, 7}, {7, 8}, {8, 5}, -- Нижняя грань
+    {1, 5}, {2, 6}, {3, 7}, {4, 8}  -- Вертикальные стойки
+}
+
 GS.TrackConnection(Players.PlayerRemoving:Connect(function(plr)
     GS.BacktrackHistory[plr] = nil
     if RadarDots[plr] then RadarDots[plr]:Destroy(); RadarDots[plr] = nil end
@@ -1142,7 +1071,6 @@ GS.TrackConnection(Players.PlayerRemoving:Connect(function(plr)
     end
 end))
 
--- Бинды клавиш (Insert, End, G, Space, ЛКМ для ножа)
 GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
     if not gp then
         if inp.KeyCode == Enum.KeyCode.Insert or inp.KeyCode == Enum.KeyCode.RightShift then
@@ -1191,7 +1119,7 @@ GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
 end))
 
 -------------------------------------------------------------------------
--- ГЛАВНЫЙ ЦИКЛ ОТРИСОВКИ ВИЗУАЛОВ И ESP
+-- ГЛАВНЫЙ ЦИКЛ ОТРИСОВКИ ФОРУМНЫХ ВИЗУАЛОВ И ESP
 -------------------------------------------------------------------------
 local LastXRayCheck = 0
 
@@ -1202,15 +1130,104 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
     local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local mousePos = UserInputService:GetMouseLocation()
+    local vpSize = Camera.ViewportSize
+    local vpCenter = vpSize / 2
+    local themeCol = GS.GetThemeColor(Config.ChinaHatColor)
 
     Watermark.Visible = Config.Watermark
     KeybindBox.Visible = Config.KeybindList
     RadarFrame.Visible = Config.Radar2D
+    SpecBox.Visible = Config.SpectatorList
+    VelHolder.Visible = Config.VelocityGraph
 
     if Config.Watermark then
         local fps = math.floor(1 / math.max(dt, 0.001))
         local desyncState = Config.Desync_Enabled and " | anti-silent" or ""
         wmTxt.Text = string.format("gamesense | %s [%s]%s | %d fps", LocalPlayer.Name, GS.GetRole(LocalPlayer), desyncState, fps)
+    end
+
+    -- 1. SKEET UNDER-CROSSHAIR INDICATORS (DT, FAKE, SILENT, WALL, AA)
+    local scopeCenter = (Config.ScopeAlignMode == "Crosshair / Mouse") and mousePos or vpCenter
+    SkeetIndHolder.Visible = Config.SkeetIndicators
+    if Config.SkeetIndicators then
+        SkeetIndHolder.Position = UDim2.new(0, scopeCenter.X + 14, 0, scopeCenter.Y + 16)
+        local activeInds = {}
+        if Config.Desync_Enabled then
+            table.insert(activeInds, {Text = "FAKE [" .. string.upper(Config.Desync_Side) .. "]", Col = Skeet.Accent})
+        end
+        if Config.SilentAim then
+            local locked = GS.CurrentTargetPlr ~= nil
+            table.insert(activeInds, {Text = locked and ("LOCKED: " .. string.sub(GS.CurrentTargetPlr.Name, 1, 8)) or "SILENT", Col = locked and Skeet.Murderer or Skeet.Cyan})
+        end
+        if Config.Wallbang then
+            table.insert(activeInds, {Text = "WALLBANG", Col = Skeet.Gold})
+        end
+        if Config.DoubleTap then
+            table.insert(activeInds, {Text = "DT [READY]", Col = Skeet.Accent})
+        end
+        if Config.AA_Enabled then
+            table.insert(activeInds, {Text = "AA: " .. string.upper(Config.AA_Yaw), Col = Skeet.Purple})
+        end
+        if Config.FakeLag then
+            table.insert(activeInds, {Text = "FL: " .. tostring(Config.FakeLagLimit) .. "T", Col = Skeet.Cyan})
+        end
+        for i = 1, 6 do
+            local data = activeInds[i]
+            if data then
+                IndLabels[i].Visible = true
+                IndLabels[i].Text = data.Text
+                IndLabels[i].TextColor3 = data.Col
+            else
+                IndLabels[i].Visible = false
+            end
+        end
+    end
+
+    -- 2. VELOCITY SPEEDOMETER & LIVE GRAPH
+    if Config.VelocityGraph and myRoot then
+        local speed = math.floor(Vector3.new(myRoot.AssemblyLinearVelocity.X, 0, myRoot.AssemblyLinearVelocity.Z).Magnitude)
+        VelText.Text = tostring(speed) .. " u/s"
+        VelText.TextColor3 = (speed > 24) and Skeet.Accent or Skeet.TextActive
+        table.remove(VelHistory, 1)
+        table.insert(VelHistory, speed)
+        for i = 1, 30 do
+            local h = math.clamp(math.floor((VelHistory[i] / 60) * 36), 2, 38)
+            VelGraphBars[i].Size = UDim2.new(0, 4, 0, h)
+            VelGraphBars[i].BackgroundColor3 = (VelHistory[i] > 24) and Skeet.Accent or Skeet.Cyan
+        end
+    end
+
+    -- 3. SPECTATOR / DEAD PLAYERS MONITOR
+    if Config.SpectatorList then
+        local deadOrSpec = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                local h = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+                if not h or h.Health <= 0 then
+                    table.insert(deadOrSpec, p.Name .. " [spec]")
+                end
+            end
+        end
+        spBody.Text = #deadOrSpec > 0 and table.concat(deadOrSpec, "\n") or "None watching"
+    end
+
+    -- 4. 3D ORBITING NEON SPHERES AROUND LOCALPLAYER
+    for i = 1, 6 do
+        local item = OrbitBalls[i]
+        if Config.OrbitSpheres and myRoot and i <= Config.OrbitCount then
+            local angle = (tick() * Config.OrbitSpeed) + ((i / Config.OrbitCount) * math.pi * 2)
+            local rad = Config.OrbitRadius
+            local yWave = math.sin(tick() * 3 + i) * 1.1
+            local targetP = myRoot.Position + Vector3.new(math.cos(angle) * rad, yWave, math.sin(angle) * rad)
+            item.Part.Transparency = 0.15
+            item.Part.Color = themeCol
+            item.Part.Position = targetP
+            item.Trail.Color = ColorSequence.new(themeCol)
+            item.Trail.Enabled = true
+        else
+            item.Part.Transparency = 1
+            item.Trail.Enabled = false
+        end
     end
 
     if Config.KeybindList then
@@ -1219,6 +1236,7 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
             local tName = GS.CurrentTargetPlr and GS.CurrentTargetPlr.Name or "ready"
             table.insert(list, "Silent aim       [" .. string.sub(tName, 1, 7) .. "]")
         end
+        if Config.Wallbang then table.insert(list, "Wallbang         [on]") end
         if Config.LegitAim then table.insert(list, "Legit aimbot     [on]") end
         if Config.Desync_Enabled then table.insert(list, "Anti-Silent      [" .. Config.Desync_Side .. "]") end
         if Config.AA_Enabled then
@@ -1268,7 +1286,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
     ScopeHolder.Visible = Config.CustomScope
     if Config.CustomScope then
         local scopeCol = GS.GetThemeColor(Config.ScopeColorMode)
-        local scopeCenter = (Config.ScopeAlignMode == "Crosshair / Mouse") and mousePos or (Camera.ViewportSize / 2)
         local velMag = myRoot and Vector3.new(myRoot.AssemblyLinearVelocity.X, 0, myRoot.AssemblyLinearVelocity.Z).Magnitude or 0
         local dynAdd = Config.ScopeDynamicSpread and math.clamp(velMag * 0.70, 0, 42) or 0
         local gap = Config.ScopeGap + math.floor(dynAdd)
@@ -1317,6 +1334,11 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         LocalPlayer.CameraMaxZoomDistance = GS.OriginalState.MaxZoom
         LocalPlayer.CameraMinZoomDistance = GS.OriginalState.MinZoom
     end
+
+    BloomEffect.Enabled = Config.WorldBloom
+    BloomEffect.Intensity = 0.8
+    BloomEffect.Size = 24
+    BloomEffect.Threshold = 0.85
 
     GS.ColorGrade.Saturation = Config.ColorSaturation / 100
     if Config.WorldAmbience then
@@ -1390,7 +1412,7 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                 local s2, v2 = Camera:WorldToViewportPoint(p2)
                 local hLine = HaloLines[i]
                 if v1 and v2 then
-                    hLine.Visible = true; hLine.From = Vector2.new(s1.X, s1.Y); hLine.To = Vector2.new(s2.X, s2.Y); hLine.Color = Skeet.Accent
+                    hLine.Visible = true; hLine.From = Vector2.new(s1.X, s1.Y); hLine.To = Vector2.new(s2.X, s2.Y); hLine.Color = themeCol
                 else
                     hLine.Visible = false
                 end
@@ -1443,8 +1465,11 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- Player ESP + 2D Radar
-    local vpCenter = Camera.ViewportSize / 2
+    -- ПОЛНЫЙ ПАК ФОРУМНОГО ESP (3D КУБЫ, CORNER БОКСЫ, HEAD DOT, LOOK LASER, TRACERS, SKELETON)
+    local tracerStart = (Config.ESP_TracerOrigin == "Bottom" and Vector2.new(vpCenter.X, vpSize.Y - 10))
+        or (Config.ESP_TracerOrigin == "Center" and vpCenter)
+        or mousePos
+
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer then
             local char = plr.Character
@@ -1507,15 +1532,24 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                             local c = Drawing.new("Line"); c.Thickness = 1.5; c.Visible = false
                             corners[i] = c
                         end
+                        local cubeLines = {}
+                        for i = 1, 12 do
+                            local cl = Drawing.new("Line"); cl.Thickness = 1.3; cl.Visible = false
+                            cubeLines[i] = cl
+                        end
                         GS.ESPObjects[plr] = {
                             BoxFill = Drawing.new("Square"),
                             BoxOutline = Drawing.new("Square"),
                             Box = Drawing.new("Square"),
                             Corners = corners,
+                            CubeLines = cubeLines,
                             HpOutline = Drawing.new("Line"),
                             HpBar = Drawing.new("Line"),
                             Name = Drawing.new("Text"),
                             Flag = Drawing.new("Text"),
+                            HeadDot = Drawing.new("Circle"),
+                            LookLaser = Drawing.new("Line"),
+                            Tracer = Drawing.new("Line"),
                             OOF1 = Drawing.new("Line"),
                             OOF2 = Drawing.new("Line"),
                             OOF3 = Drawing.new("Line"),
@@ -1528,6 +1562,9 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                         GS.ESPObjects[plr].HpBar.Thickness = 1.5
                         GS.ESPObjects[plr].Name.Size = 12; GS.ESPObjects[plr].Name.Center = true; GS.ESPObjects[plr].Name.Outline = true
                         GS.ESPObjects[plr].Flag.Size = 11; GS.ESPObjects[plr].Flag.Center = true; GS.ESPObjects[plr].Flag.Outline = true
+                        GS.ESPObjects[plr].HeadDot.Thickness = 1.5; GS.ESPObjects[plr].HeadDot.Filled = false
+                        GS.ESPObjects[plr].LookLaser.Thickness = 1.4
+                        GS.ESPObjects[plr].Tracer.Thickness = 1.2
                         GS.ESPObjects[plr].OOF1.Thickness = 1.8; GS.ESPObjects[plr].OOF2.Thickness = 1.8; GS.ESPObjects[plr].OOF3.Thickness = 1.8
                     end
 
@@ -1540,11 +1577,41 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                         local w, h = math.floor(scale * 1.75), math.floor(scale * 2.55)
                         local x, y = math.floor(pos.X - w / 2), math.floor(pos.Y - h / 2)
 
-                        esp.BoxFill.Visible = Config.ESP_Box and Config.ESP_BoxFill
+                        esp.BoxFill.Visible = Config.ESP_Box and Config.ESP_BoxFill and (Config.ESP_BoxStyle ~= "3D Box (12 Lines)")
                         esp.BoxFill.Size = Vector2.new(w, h); esp.BoxFill.Position = Vector2.new(x, y)
 
-                        if Config.ESP_Box and Config.ESP_BoxStyle == "Corner" then
+                        if Config.ESP_Box and Config.ESP_BoxStyle == "3D Box (12 Lines)" then
                             esp.BoxOutline.Visible = false; esp.Box.Visible = false
+                            for idx = 1, 8 do esp.Corners[idx].Visible = false end
+                            local cf = hrp.CFrame
+                            local sx, sy, sz = 1.8, 2.8, 1.2
+                            local verts3D = {
+                                cf * Vector3.new(-sx, sy, -sz), cf * Vector3.new(sx, sy, -sz),
+                                cf * Vector3.new(sx, sy, sz),  cf * Vector3.new(-sx, sy, sz),
+                                cf * Vector3.new(-sx, -sy, -sz), cf * Vector3.new(sx, -sy, -sz),
+                                cf * Vector3.new(sx, -sy, sz),  cf * Vector3.new(-sx, -sy, sz)
+                            }
+                            local verts2D = {}
+                            local allVis = true
+                            for vIdx = 1, 8 do
+                                local vp, vVis = Camera:WorldToViewportPoint(verts3D[vIdx])
+                                if not vVis then allVis = false; break end
+                                verts2D[vIdx] = Vector2.new(vp.X, vp.Y)
+                            end
+                            for eIdx, edge in ipairs(CubeEdges) do
+                                local ln = esp.CubeLines[eIdx]
+                                if allVis then
+                                    ln.Visible = true
+                                    ln.From = verts2D[edge[1]]
+                                    ln.To = verts2D[edge[2]]
+                                    ln.Color = col
+                                else
+                                    ln.Visible = false
+                                end
+                            end
+                        elseif Config.ESP_Box and Config.ESP_BoxStyle == "Corner" then
+                            esp.BoxOutline.Visible = false; esp.Box.Visible = false
+                            for idx = 1, 12 do esp.CubeLines[idx].Visible = false end
                             local cw = math.max(math.floor(w * 0.26), 4)
                             local ch = math.max(math.floor(h * 0.22), 4)
                             local cPts = {
@@ -1563,6 +1630,7 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                             end
                         else
                             for idx = 1, 8 do esp.Corners[idx].Visible = false end
+                            for idx = 1, 12 do esp.CubeLines[idx].Visible = false end
                             esp.BoxOutline.Visible = Config.ESP_Box; esp.BoxOutline.Size = Vector2.new(w, h); esp.BoxOutline.Position = Vector2.new(x, y)
                             esp.Box.Visible = Config.ESP_Box; esp.Box.Size = Vector2.new(w, h); esp.Box.Position = Vector2.new(x, y); esp.Box.Color = col
                         end
@@ -1575,10 +1643,54 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                         esp.Name.Visible = Config.ESP_Name; esp.Name.Position = Vector2.new(pos.X, y - 14); esp.Name.Text = plr.Name; esp.Name.Color = Color3.fromRGB(240, 240, 240)
 
                         local d = myRoot and math.floor((hrp.Position - myRoot.Position).Magnitude) or 0
+                        local heldTool = char:FindFirstChildOfClass("Tool")
+                        local heldStr = (heldTool and (" [" .. string.upper(heldTool.Name) .. "]")) or ""
                         esp.Flag.Visible = Config.ESP_Flags or Config.ESP_Distance
                         esp.Flag.Position = Vector2.new(pos.X, y + h + 2)
-                        esp.Flag.Text = string.upper(role) .. (Config.ESP_Distance and string.format(" · %dM", d) or "")
+                        esp.Flag.Text = string.upper(role) .. heldStr .. (Config.ESP_Distance and string.format(" · %dM", d) or "")
                         esp.Flag.Color = col
+
+                        -- Head Dot & 3D Look Laser
+                        local pHead = char:FindFirstChild("Head")
+                        if pHead and (Config.ESP_HeadDot or Config.ESP_LookLaser) then
+                            local hp2D, hVis = Camera:WorldToViewportPoint(pHead.Position)
+                            if hVis then
+                                esp.HeadDot.Visible = Config.ESP_HeadDot
+                                esp.HeadDot.Position = Vector2.new(hp2D.X, hp2D.Y)
+                                esp.HeadDot.Radius = math.clamp(800 / math.max(hp2D.Z, 1), 2, 9)
+                                esp.HeadDot.Color = col
+
+                                if Config.ESP_LookLaser then
+                                    local lookEnd, lVis = Camera:WorldToViewportPoint(pHead.Position + (pHead.CFrame.LookVector * 5.5))
+                                    if lVis then
+                                        esp.LookLaser.Visible = true
+                                        esp.LookLaser.From = Vector2.new(hp2D.X, hp2D.Y)
+                                        esp.LookLaser.To = Vector2.new(lookEnd.X, lookEnd.Y)
+                                        esp.LookLaser.Color = Skeet.Cyan
+                                    else
+                                        esp.LookLaser.Visible = false
+                                    end
+                                else
+                                    esp.LookLaser.Visible = false
+                                end
+                            else
+                                esp.HeadDot.Visible = false
+                                esp.LookLaser.Visible = false
+                            end
+                        else
+                            esp.HeadDot.Visible = false
+                            esp.LookLaser.Visible = false
+                        end
+
+                        -- Snapline Tracer to Enemy
+                        if Config.ESP_Tracers then
+                            esp.Tracer.Visible = true
+                            esp.Tracer.From = tracerStart
+                            esp.Tracer.To = Vector2.new(pos.X, y + h)
+                            esp.Tracer.Color = col
+                        else
+                            esp.Tracer.Visible = false
+                        end
 
                         if Config.ESP_Skeleton then
                             local pairsList = char:FindFirstChild("UpperTorso") and BonePairsR15 or BonePairsR6
@@ -1605,7 +1717,9 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                     else
                         esp.BoxFill.Visible = false; esp.BoxOutline.Visible = false; esp.Box.Visible = false
                         esp.HpOutline.Visible = false; esp.HpBar.Visible = false; esp.Name.Visible = false; esp.Flag.Visible = false
+                        esp.HeadDot.Visible = false; esp.LookLaser.Visible = false; esp.Tracer.Visible = false
                         for idx = 1, 8 do esp.Corners[idx].Visible = false end
+                        for idx = 1, 12 do esp.CubeLines[idx].Visible = false end
                         for idx = 1, 10 do esp.Bones[idx].Visible = false end
 
                         if Config.ESP_OOFArrows then
