@@ -1,11 +1,10 @@
--- File: combat.lua | Pro MM2 Silent Aim, Displacement Resolver, 4-Layer Wallbang & Dedicated Aim Visuals Engine
+-- File: combat.lua | Pure 360° No-FOV Rage Silent Aim, Displacement Resolver, Server Wallbang & 360° Aim Visuals
 local GS = _G.GS
 if not GS then return end
 
 local Players = GS.Players
 local RunService = GS.RunService
 local UserInputService = GS.UserInputService
-local GuiService = game:GetService("GuiService")
 local Workspace = GS.Workspace
 local Camera = GS.Camera
 local LocalPlayer = GS.LocalPlayer
@@ -14,27 +13,24 @@ local Config = GS.Config
 local Skeet = GS.Skeet
 
 -------------------------------------------------------------------------
--- ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ ПРОФЕССИОНАЛЬНОГО АИМА И БОЕВЫХ ВИЗУАЛОВ
+-- НАСТРОЙКИ 360° RAGE SILENT AIM (БЕЗ ОГРАНИЧЕНИЙ FOV!)
 -------------------------------------------------------------------------
+Config.SilentAim = true
+Config.ShowFOV = false -- Круг FOV отключён по умолчанию (работает полный 360° захват!)
+Config.Wallbang = true
+
 local CombatDefaults = {
-    SilentAim = true,
     DirectClickInvoke = true,
     FixBulletDrop = true,
     TargetRolePriority = "Smart (Role-Based)", -- Smart (Role-Based), Any Closest, Murderer Only
-    HitPart = "HumanoidRootPart",              -- HumanoidRootPart, Head, UpperTorso, Multi-Point Auto
-    MultiPointAim = true,                      -- Автоматически выбирает открытую часть тела (руку/голову), если торс за стеной
-    ResolverEnabled = true,                    -- Вычисляет реальную скорость по смещению координат (пробивает чужой Desync!)
-    Prediction = 13,                           -- Множитель упреждения (13 = 0.135с)
-    JumpOffset = 0.08,                         -- Компенсация гравитации в прыжке
-    Wallbang = true,                           -- Прострел сквозь стены (Raycast Spoof + Micro-Corner Peak)
-    AutoWallbangShoot = false,                 -- Автоматически стрелять через стены, как только Мардер в радиусе досягаемости
+    HitPart = "HumanoidRootPart",
+    MultiPointAim = true,
+    ResolverEnabled = true,
+    Prediction = 13,
     HitChance = 100,
-    FOV = 260,
-    ShowFOV = true,
-    FOVFilled = false,
     TargetLine = true,
-    ShowPredictionVisualizer = true,           -- Показывает точку упреждения и вектор движения врага
-    ShowTargetHighlightBox = true,             -- 3D неоновый маркер на захваченном хитбоксе врага
+    ShowPredictionVisualizer = true,
+    ShowTargetHighlightBox = true,
     AutoFire = false,
     LegitAim = false,
     LegitAimKey = "MouseButton2 (RMB)",
@@ -53,7 +49,7 @@ for k, v in pairs(CombatDefaults) do
     end
 end
 
--- Игнорируем модельку нашего персонажа для стандартной мыши
+-- Игнорируем собственного персонажа для стандартной мыши
 task.spawn(function()
     if LocalPlayer.Character then
         LocalMouse.TargetFilter = LocalPlayer.Character
@@ -64,10 +60,9 @@ GS.TrackConnection(LocalPlayer.CharacterAdded:Connect(function(ch)
 end))
 
 -------------------------------------------------------------------------
--- 1. ТОЧНАЯ МАТЕМАТИКА ЭКРАНА И ЛУЧЕЙ (БЕЗ СМЕЩЕНИЯ GUIINSET НА 58 ПИКСЕЛЕЙ!)
+-- 1. ПРОВЕРКА ВИДИМОСТИ И ЛУЧЕЙ
 -------------------------------------------------------------------------
 local function GetTrueMouseScreenPos()
-    -- UserInputService:GetMouseLocation() возвращает точные экранные координаты, совместимые с Camera:WorldToViewportPoint и Drawing!
     return UserInputService:GetMouseLocation()
 end
 
@@ -98,7 +93,6 @@ function GS.IsVisible(part, customOrigin)
     return (not res) or res.Instance:IsDescendantOf(part.Parent)
 end
 
--- Точка пересечения луча из центра прицела с миром (0 пикселей погрешности!)
 function GS.GetExactCrosshairWorldPoint()
     local mPos = GetTrueMouseScreenPos()
     local ray = Camera:ViewportPointToRay(mPos.X, mPos.Y)
@@ -113,10 +107,8 @@ function GS.GetExactCrosshairWorldPoint()
 end
 
 -------------------------------------------------------------------------
--- 2. DISPLACEMENT RESOLVER (ВЫЧИСЛЕНИЕ РЕАЛЬНОЙ СКОРОСТИ ПРОТИВ ЧУЖОГО ДЕСИНКА!)
+-- 2. DISPLACEMENT RESOLVER (ПРОТИВ ЧУЖОГО ДЕСИНКА И АНТИ-АИМОВ)
 -------------------------------------------------------------------------
--- Если враг использует Velocity Spoof / Anti-Aim Desync, его AssemblyLinearVelocity врёт.
--- Мы считаем реальную скорость по изменению его координат (Pos - OldPos) / dt!
 local ResolverData = {}
 
 local function UpdateResolver(dt)
@@ -136,7 +128,6 @@ local function UpdateResolver(dt)
                 else
                     local displacement = curPos - data.LastPos
                     local rawVel = displacement / dt
-                    -- Отсекаем телепорты свыше 200 стадов за кадр, сглаживаем через Lerp(0.45)
                     if displacement.Magnitude < 35 then
                         data.ResolvedVel = data.ResolvedVel:Lerp(Vector3.new(rawVel.X, rawVel.Y * 0.35, rawVel.Z), 0.45)
                     else
@@ -165,12 +156,11 @@ local function GetTargetPredictedPosition(plr, part)
         vel = Vector3.new(vel.X, vel.Y * 0.35, vel.Z)
     end
 
-    -- Добавляем микро-компенсацию высоты дула (+0.12 стада), чтобы пуля шла строго в центр хитбокса
     return basePos + (vel * predTime) + Vector3.new(0, 0.12, 0)
 end
 
 -------------------------------------------------------------------------
--- 3. МУЛЬТИ-ПОИНТ СКАНЕР И УМНЫЙ СЕРВЕРНЫЙ WALLBANG (CORNER / HIGH PEAK)
+-- 3. ЧИСТЫЙ 360° ПОИСК ЦЕЛИ БЕЗ FOV (БЕРЁТ ВРАГА ДАЖЕ ЗА СПИНОЙ И ЗА СТЕНАМИ!)
 -------------------------------------------------------------------------
 local MultiPointParts = {
     "HumanoidRootPart",
@@ -184,7 +174,6 @@ local MultiPointParts = {
     "Torso"
 }
 
--- Ищет открытую точку на теле врага, а если враг полностью за стеной — ищет лучшую точку для прострела Wallbang!
 local function FindOptimalTargetPart(char)
     if not char then return nil, false end
     local mainName = (Config.HitPart == "Multi-Point Auto") and "HumanoidRootPart" or (Config.HitPart or "HumanoidRootPart")
@@ -206,14 +195,12 @@ local function FindOptimalTargetPart(char)
     return primary, false
 end
 
--- Ищет обходную точку прямой видимости (Vantage Point) для серверного прострела сквозь стены!
 local function FindWallbangVantageCFrame(myRoot, targetPart)
     if not myRoot or not targetPart then return nil end
     local myPos = myRoot.Position
     local tPos = targetPart.Position
 
-    -- 1. Сначала проверяем смещения около самого стрелка (Corner Peak: влево, вправо, вверх над крышей/забором),
-    -- чтобы сервер засчитал выстрел с минимальным смещением!
+    -- 1. Проверяем точки обхода вокруг стрелка (вверх над препятствием и по бокам)
     local camRight = Camera.CFrame.RightVector
     local localOffsets = {
         Vector3.new(0, 8, 0),
@@ -230,7 +217,7 @@ local function FindWallbangVantageCFrame(myRoot, targetPart)
         end
     end
 
-    -- 2. Если враг в закрытой комнате — берём точку прямо над/рядом с врагом (Micro-LOS Vantage)
+    -- 2. Если враг в другой комнате/за толстой стеной — берём точку прямой видимости прямо над ним
     local targetOffsets = {
         Vector3.new(0, 5.5, 0),
         Vector3.new(0, 2.5, 4.5),
@@ -248,14 +235,14 @@ local function FindWallbangVantageCFrame(myRoot, targetPart)
     return CFrame.lookAt(tPos + Vector3.new(0, 4, 2), tPos)
 end
 
--- Главная функция выбора лучшей цели в радиусе FOV (с фоллбэком на 360° Rage)
 local CurrentTargetIsVisible = false
 
+-- 360° TARGET SELECTOR: Игнорирует FOV для Silent Aim, выбирает лучшую цель на всей карте по 3D-дистанции и видимости!
 function GS.GetBestTargetInRadius(fovRadius, requireVisible)
     local myRole = GS.GetRole(LocalPlayer)
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    local mousePos = GetTrueMouseScreenPos()
+    local myPos = myRoot and myRoot.Position or Camera.CFrame.Position
 
     local bestPart, bestPlr, bestPos, bestVis = nil, nil, nil, false
     local bestScore = math.huge
@@ -263,7 +250,7 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
     local priorityMurdererOnly = (Config.TargetRolePriority == "Murderer Only")
         or (Config.TargetRolePriority == "Smart (Role-Based)" and myRole == "Sheriff" and GS.FindByRole("Murderer") ~= nil)
 
-    local function scanCandidates(ignoreRole, ignoreScreenFOV)
+    local function scan360Candidates(ignoreRole)
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer and plr.Character then
                 local char = plr.Character
@@ -273,31 +260,22 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
                     if ignoreRole or (not priorityMurdererOnly) or (role == "Murderer") then
                         local part, isVis = FindOptimalTargetPart(char)
                         if part and ((not requireVisible) or Config.Wallbang or isVis) then
-                            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                            local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                            -- Считаем 3D дистанцию в мире (вообще без привязки к углу камеры или FOV!)
+                            local worldDist = (part.Position - myPos).Magnitude
 
-                            -- Приоритет видимым целям (бонус к дистанции)
-                            local scoreMod = isVis and 0.75 or 1.0
+                            -- Если цель открыта (Visible), даём ей приоритет перед целью за стеной
+                            local score = isVis and (worldDist * 0.5) or worldDist
+                            -- Если цель — Мардер, даём максимальный приоритет!
+                            if role == "Murderer" then
+                                score = score * 0.1
+                            end
 
-                            if onScreen and screenDist <= fovRadius then
-                                local weighted = screenDist * scoreMod
-                                if weighted < bestScore then
-                                    bestScore = weighted
-                                    bestPart = part
-                                    bestPlr = plr
-                                    bestPos = part.Position
-                                    bestVis = isVis
-                                end
-                            elseif ignoreScreenFOV then
-                                local worldDist = myRoot and (part.Position - myRoot.Position).Magnitude or 999
-                                local weighted = worldDist * scoreMod
-                                if weighted < bestScore then
-                                    bestScore = weighted
-                                    bestPart = part
-                                    bestPlr = plr
-                                    bestPos = part.Position
-                                    bestVis = isVis
-                                end
+                            if score < bestScore then
+                                bestScore = score
+                                bestPart = part
+                                bestPlr = plr
+                                bestPos = part.Position
+                                bestVis = isVis
                             end
                         end
                     end
@@ -306,17 +284,13 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
         end
     end
 
-    -- 1. Ищем в круге FOV
-    scanCandidates(false, false)
-    -- 2. Если в круге FOV никого нет (например, Мардер сзади) и это не жесткий Legit — ищем на 360°
-    if not bestPart and not requireVisible then
-        bestScore = math.huge
-        scanCandidates(false, true)
-    end
-    -- 3. Если Мардер еще не определен (или тест в лобби) — берем ближайшего игрока
+    -- 1. Ищем приоритетную цель (Мардера или по роли) на все 360 градусов вокруг нас
+    scan360Candidates(false)
+
+    -- 2. Если Мардер ещё не выдан (например в лобби или кастомном режиме) — берём любого ближайшего врага на 360 градусов
     if not bestPart and Config.TargetRolePriority == "Smart (Role-Based)" then
         bestScore = math.huge
-        scanCandidates(true, false)
+        scan360Candidates(true)
     end
 
     local aimPos = nil
@@ -327,7 +301,7 @@ function GS.GetBestTargetInRadius(fovRadius, requireVisible)
 end
 
 -------------------------------------------------------------------------
--- 4. ПОИСК ОРУЖИЯ И ГАРАНТИРОВАННЫЙ ВЫСТРЕЛ (DIRECT + WALLBANG)
+-- 4. ПОИСК ОРУЖИЯ И ГАРАНТИРОВАННЫЙ 360° ВЫСТРЕЛ
 -------------------------------------------------------------------------
 function GS.FindLivingSheriffGun()
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -382,6 +356,11 @@ function GS.DirectShootGunAt(targetPos, targetPlr, targetPart)
             if vantageCF then
                 myRoot.CFrame = vantageCF
             end
+        elseif myRoot then
+            -- Даже если стен нет, но враг стоит сзади нас (360°), на 1 микро-тик поворачиваем серверный CFrame лицом к врагу,
+            -- чтобы пуля из дула пистолета не застряла в нашей собственной спине!
+            savedCF = myRoot.CFrame
+            myRoot.CFrame = CFrame.lookAt(myRoot.Position, Vector3.new(targetPos.X, myRoot.Position.Y, targetPos.Z))
         end
 
         pcall(function()
@@ -411,7 +390,7 @@ function GS.RemoteFireLivingSheriffGun(customTargetPos)
     end
     local remote = GS.FindGunShootRemote(liveGun)
     if remote then
-        local tPart, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
+        local _, tPlr, tPos = GS.GetBestTargetInRadius(9999, false)
         local targetPos = customTargetPos or tPos or GS.GetExactCrosshairWorldPoint()
         if tPlr then GS.LastAttackData = {Player = tPlr, Time = tick()} end
         GS.PlayCSGOWeaponSound(true)
@@ -459,7 +438,7 @@ function GS.StealGunFromLivingSheriff()
 end
 
 -------------------------------------------------------------------------
--- 5. ЧЕТЫРЁХСЛОЙНЫЙ ХУК МЕТАТАБЛИЦЫ (БЕЗ ЛАГОВ КАМЕРЫ И С 100% ПРОБИТИЕМ)
+-- 5. ХУК МЕТАТАБЛИЦЫ 360° SILENT AIM + WALLBANG (БЕЗ ЛАГОВ КАМЕРЫ!)
 -------------------------------------------------------------------------
 local LastWeaponClickTime = 0
 
@@ -469,7 +448,7 @@ GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
         if myChar and (myChar:FindFirstChild("Gun") or myChar:FindFirstChild("Knife")) then
             LastWeaponClickTime = tick()
             if myChar:FindFirstChild("Gun") and Config.SilentAim and Config.DirectClickInvoke then
-                local tPart, tPlr, tPos = GS.GetBestTargetInRadius(Config.FOV, false)
+                local tPart, tPlr, tPos = GS.GetBestTargetInRadius(9999, false)
                 if tPart and tPos and math.random(1, 100) <= Config.HitChance then
                     GS.DirectShootGunAt(tPos, tPlr, tPart)
                 end
@@ -501,7 +480,6 @@ if mt and setreadonly then
     local oldIndex = GS.oldIndex
     setreadonly(mt, false)
 
-    -- Слой 1: Безопасный для камеры перехват Mouse.Hit и Mouse.Target (только с оружием в руках!)
     mt.__index = newcclosure(function(self, key)
         if not GS.Unhooked and not checkcaller() and self == LocalMouse then
             if key == "Hit" or key == "hit" or key == "Target" or key == "target" then
@@ -531,7 +509,6 @@ if mt and setreadonly then
         return oldIndex(self, key)
     end)
 
-    -- Слой 2: Перехват Raycast + FindPartOnRay + InvokeServer / FireServer
     mt.__namecall = newcclosure(function(self, ...)
         if GS.Unhooked or checkcaller() or GS.RaycastBypass then
             return oldNamecall(self, ...)
@@ -540,7 +517,6 @@ if mt and setreadonly then
         local method = getnamecallmethod()
         local args = {...}
 
-        -- Перехват клиентского луча оружия в момент клика (чтобы пуля не втыкалась в пол/стену перед тобой!)
         if (tick() - LastWeaponClickTime) <= 0.20 then
             if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "FindPartOnRayWithWhitelist" then
                 if Config.SilentAim and GS.CurrentTargetPart and GS.CurrentAimPos then
@@ -559,13 +535,12 @@ if mt and setreadonly then
             end
         end
 
-        -- Перехват сетевого пакета выстрела (CreateBeam / ShootGun / Shoot / Throw)
         if method == "FireServer" or method == "InvokeServer" then
             local isWep = IsWeaponRemote(self)
             local isOfficialCreateBeam = (method == "InvokeServer" and args[1] == 1 and typeof(args[2]) == "Vector3")
 
             if isWep or isOfficialCreateBeam then
-                local tPart, tPlr, tPos, isVis = GS.GetBestTargetInRadius(Config.FOV, false)
+                local tPart, tPlr, tPos, isVis = GS.GetBestTargetInRadius(9999, false)
                 local targetPart = tPart or GS.CurrentTargetPart
                 local targetPlr = tPlr or GS.CurrentTargetPlr
                 local aimPos = tPos or GS.CurrentAimPos
@@ -579,15 +554,17 @@ if mt and setreadonly then
                 if Config.SilentAim and targetPart and aimPos and math.random(1, 100) <= Config.HitChance then
                     GS.LastAttackData = {Player = targetPlr, Time = tick()}
 
-                    -- Если враг за стеной и включён Wallbang — на время сетевого вызова ставим серверный CFrame в точку обхода стены
                     local savedCF = nil
                     if Config.Wallbang and myRoot and not isVis then
                         savedCF = myRoot.CFrame
                         local vantageCF = FindWallbangVantageCFrame(myRoot, targetPart)
                         if vantageCF then myRoot.CFrame = vantageCF end
+                    elseif myRoot then
+                        -- Разворачиваем серверный хитбокс лицом к цели (для 360° выстрела назад без блокировки своим телом)
+                        savedCF = myRoot.CFrame
+                        myRoot.CFrame = CFrame.lookAt(myRoot.Position, Vector3.new(aimPos.X, myRoot.Position.Y, aimPos.Z))
                     end
 
-                    -- Подменяем координаты выстрела во всех форматах (Vector3 / CFrame)
                     local coordIndices = {}
                     for i, v in ipairs(args) do
                         if typeof(v) == "Vector3" or typeof(v) == "CFrame" then
@@ -623,7 +600,6 @@ if mt and setreadonly then
                         end
                     end
 
-                    -- Визуальный лазерный след до точки попадания!
                     if myChar and myChar:FindFirstChild("Head") then
                         GS.SpawnProBulletTracer(myChar.Head.Position, aimPos)
                     end
@@ -653,12 +629,8 @@ if mt and setreadonly then
 end
 
 -------------------------------------------------------------------------
--- 6. ВСТРОЕННЫЙ ДВИЖОК БОЕВЫХ ВИЗУАЛОВ АИМА (FOV, SNAPLINE, PREDICTION DOT, 3D LOCK BOX)
+-- 6. БОЕВЫЕ ВИЗУАЛЫ 360° SILENT AIM (БЕЗ КРУГА FOV + ИНДИКАТОР ЦЕЛИ ЗА СПИНОЙ!)
 -------------------------------------------------------------------------
--- Рисует все визуалы Сайлент Аима и Валлбанга прямо из combat.lua, чтобы они 100% работали!
-local AimFOVOutline = GS.TrackDrawing(Drawing and Drawing.new("Circle"))
-local AimFOVCircle = GS.TrackDrawing(Drawing and Drawing.new("Circle"))
-local LegitFOVDrawing = GS.TrackDrawing(Drawing and Drawing.new("Circle"))
 local AimSnaplineOutline = GS.TrackDrawing(Drawing and Drawing.new("Line"))
 local AimSnapline = GS.TrackDrawing(Drawing and Drawing.new("Line"))
 local PredLine = GS.TrackDrawing(Drawing and Drawing.new("Line"))
@@ -668,10 +640,6 @@ local TargetCross2 = GS.TrackDrawing(Drawing and Drawing.new("Line"))
 local AimStatusTag = GS.TrackDrawing(Drawing and Drawing.new("Text"))
 
 if Drawing then
-    AimFOVOutline.Thickness = 3; AimFOVOutline.Color = Color3.new(0, 0, 0); AimFOVOutline.Filled = false; AimFOVOutline.NumSides = 64
-    AimFOVCircle.Thickness = 1.5; AimFOVCircle.Color = Skeet.Accent; AimFOVCircle.Filled = false; AimFOVCircle.NumSides = 64
-    LegitFOVDrawing.Thickness = 1.2; LegitFOVDrawing.Color = Skeet.Cyan; LegitFOVDrawing.Filled = false; LegitFOVDrawing.NumSides = 64
-
     AimSnaplineOutline.Thickness = 3; AimSnaplineOutline.Color = Color3.new(0, 0, 0)
     AimSnapline.Thickness = 1.5; AimSnapline.Color = Skeet.Accent
 
@@ -684,7 +652,6 @@ if Drawing then
     AimStatusTag.Size = 13; AimStatusTag.Center = true; AimStatusTag.Outline = true; AimStatusTag.Color = Skeet.Accent
 end
 
--- 3D Неоновый Бокс-Маркер на хитбоксе захваченной цели
 local TargetBox3D = GS.TrackInstance(Instance.new("Part"))
 TargetBox3D.Name = "GS_AimTargetBox"
 TargetBox3D.Anchored = true; TargetBox3D.CanCollide = false; TargetBox3D.CanQuery = false; TargetBox3D.CanTouch = false; TargetBox3D.CastShadow = false
@@ -702,96 +669,103 @@ TargetBoxSelection.SurfaceTransparency = 0.75
 TargetBoxSelection.SurfaceColor3 = Skeet.Murderer
 TargetBoxSelection.Visible = false
 
--------------------------------------------------------------------------
--- 7. ГЛАВНЫЙ БОЕВОЙ ЦИКЛ (RESOLVER + AIM VISUALS + LEGITBOT + AUTO-WALLBANG)
--------------------------------------------------------------------------
 local LastTriggerShot = 0
 local LastAutoShoot = 0
 
 GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
     if GS.Unhooked then return end
 
-    -- 1. Обновляем Resolver скоростей врагов
     UpdateResolver(dt)
 
-    -- 2. Держим камеру стабильно привязанной к нашему Humanoid
     local myChar = LocalPlayer.Character
     local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if myHum and Camera.CameraSubject ~= myHum then
         Camera.CameraSubject = myHum
     end
 
-    -- 3. Находим лучшую цель для Silent Aim
-    local tPart, tPlr, tAimPos, isVis = GS.GetBestTargetInRadius(Config.FOV, false)
+    -- Ищем лучшую цель на все 360 градусов без ограничения FOV!
+    local tPart, tPlr, tAimPos, isVis = GS.GetBestTargetInRadius(9999, false)
     GS.CurrentTargetPart = tPart
     GS.CurrentTargetPlr = tPlr
     GS.CurrentAimPos = tAimPos
     CurrentTargetIsVisible = isVis
 
     local mousePos = GetTrueMouseScreenPos()
+    local vpSize = Camera.ViewportSize
+    local vpCenter = vpSize / 2
 
-    -- 4. Отрисовка боевых визуалов аима (FOV, Snapline, Prediction Dot, 3D Hitbox Box, Status Tag)
     if Drawing then
-        local showRageFOV = Config.SilentAim and Config.ShowFOV
-        AimFOVOutline.Visible = showRageFOV
-        AimFOVOutline.Radius = Config.FOV
-        AimFOVOutline.Position = mousePos
-
-        AimFOVCircle.Visible = showRageFOV
-        AimFOVCircle.Radius = Config.FOV
-        AimFOVCircle.Position = mousePos
-        AimFOVCircle.Color = tPart and (isVis and Skeet.Accent or Skeet.Gold) or Color3.fromRGB(200, 200, 200)
-
-        LegitFOVDrawing.Visible = Config.LegitAim and Config.ShowLegitFOV
-        LegitFOVDrawing.Radius = Config.LegitFOV
-        LegitFOVDrawing.Position = mousePos
-
         if Config.SilentAim and tPart and tAimPos then
             local partScreen, partOnScreen = Camera:WorldToViewportPoint(tPart.Position)
             local predScreen, predOnScreen = Camera:WorldToViewportPoint(tAimPos)
             local stateCol = isVis and Skeet.Accent or Skeet.Gold
+            local dist3D = myRoot and math.floor((tPart.Position - myRoot.Position).Magnitude) or 0
 
-            -- Snapline от курсора к точке упреждения
-            local drawSnap = Config.TargetLine and predOnScreen
-            AimSnaplineOutline.Visible = drawSnap
-            AimSnapline.Visible = drawSnap
-            if drawSnap then
-                AimSnaplineOutline.From = mousePos
-                AimSnaplineOutline.To = Vector2.new(predScreen.X, predScreen.Y)
-                AimSnapline.From = mousePos
-                AimSnapline.To = Vector2.new(predScreen.X, predScreen.Y)
-                AimSnapline.Color = stateCol
-            end
-
-            -- Визуализатор Предикшна (Линия от реального тела врага до точки упреждения + кружок попадания + крестик)
-            local drawPred = Config.ShowPredictionVisualizer and partOnScreen and predOnScreen
-            PredLine.Visible = drawPred
-            PredCircle.Visible = drawPred
-            TargetCross1.Visible = drawPred
-            TargetCross2.Visible = drawPred
-            AimStatusTag.Visible = drawPred
-
-            if drawPred then
-                local p2D = Vector2.new(partScreen.X, partScreen.Y)
+            if predOnScreen then
+                -- Цель перед нами на экране
                 local aim2D = Vector2.new(predScreen.X, predScreen.Y)
+                local p2D = Vector2.new(partScreen.X, partScreen.Y)
 
-                PredLine.From = p2D
-                PredLine.To = aim2D
-                PredLine.Color = Skeet.Cyan
+                AimSnaplineOutline.Visible = Config.TargetLine
+                AimSnapline.Visible = Config.TargetLine
+                if Config.TargetLine then
+                    AimSnaplineOutline.From = mousePos
+                    AimSnaplineOutline.To = aim2D
+                    AimSnapline.From = mousePos
+                    AimSnapline.To = aim2D
+                    AimSnapline.Color = stateCol
+                end
 
-                PredCircle.Position = aim2D
-                PredCircle.Color = Skeet.Murderer
+                local drawPred = Config.ShowPredictionVisualizer
+                PredLine.Visible = drawPred and partOnScreen
+                PredCircle.Visible = drawPred
+                TargetCross1.Visible = drawPred
+                TargetCross2.Visible = drawPred
+                AimStatusTag.Visible = drawPred
 
-                TargetCross1.From = aim2D - Vector2.new(6, 6)
-                TargetCross1.To = aim2D + Vector2.new(6, 6)
-                TargetCross1.Color = stateCol
+                if drawPred then
+                    PredLine.From = p2D
+                    PredLine.To = aim2D
+                    PredCircle.Position = aim2D
 
-                TargetCross2.From = aim2D + Vector2.new(-6, 6)
-                TargetCross2.To = aim2D + Vector2.new(6, -6)
-                TargetCross2.Color = stateCol
+                    TargetCross1.From = aim2D - Vector2.new(6, 6)
+                    TargetCross1.To = aim2D + Vector2.new(6, 6)
+                    TargetCross1.Color = stateCol
 
-                AimStatusTag.Position = aim2D + Vector2.new(0, 10)
-                AimStatusTag.Text = string.format("[%s] %s", isVis and "VISIBLE" or "WALLBANG", tPlr.Name)
+                    TargetCross2.From = aim2D + Vector2.new(-6, 6)
+                    TargetCross2.To = aim2D + Vector2.new(6, -6)
+                    TargetCross2.Color = stateCol
+
+                    AimStatusTag.Position = aim2D + Vector2.new(0, 10)
+                    AimStatusTag.Text = string.format("[360° %s] %s (%dm)", isVis and "VISIBLE" or "WALLBANG", tPlr.Name, dist3D)
+                    AimStatusTag.Color = stateCol
+                end
+            else
+                -- Цель за спиной (вне экрана) — рисуем 360° радарный указатель направления от прицела!
+                local relPos = Camera.CFrame:PointToObjectSpace(tAimPos)
+                local angle = math.atan2(-relPos.Y, relPos.X)
+                local edgePoint = vpCenter + Vector2.new(math.cos(angle) * 135, math.sin(angle) * 135)
+
+                AimSnaplineOutline.Visible = Config.TargetLine
+                AimSnapline.Visible = Config.TargetLine
+                if Config.TargetLine then
+                    AimSnaplineOutline.From = vpCenter
+                    AimSnaplineOutline.To = edgePoint
+                    AimSnapline.From = vpCenter
+                    AimSnapline.To = edgePoint
+                    AimSnapline.Color = stateCol
+                end
+
+                PredLine.Visible = false
+                PredCircle.Visible = true
+                PredCircle.Position = edgePoint
+                TargetCross1.Visible = false
+                TargetCross2.Visible = false
+
+                AimStatusTag.Visible = true
+                AimStatusTag.Position = edgePoint + Vector2.new(0, 10)
+                AimStatusTag.Text = string.format("[360° BEHIND / %s] %s (%dm)", isVis and "VIS" or "WALL", tPlr.Name, dist3D)
                 AimStatusTag.Color = stateCol
             end
         else
@@ -805,7 +779,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- 3D Box-маркер на самом хитбоксе цели в мире
     if Config.SilentAim and Config.ShowTargetHighlightBox and tPart then
         TargetBox3D.CFrame = tPart.CFrame
         TargetBox3D.Size = tPart.Size + Vector3.new(0.25, 0.25, 0.25)
@@ -820,43 +793,12 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
 
     if not myChar then return end
 
-    -- 5. Плавный Легитбот
-    if Config.LegitAim and not (GS.OuterWindow and GS.OuterWindow.Visible) then
-        local activeKey = (Config.LegitAimKey == "Always On")
-            or (Config.LegitAimKey == "MouseButton2 (RMB)" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2))
-            or (Config.LegitAimKey == "Key E" and UserInputService:IsKeyDown(Enum.KeyCode.E))
-
-        if activeKey then
-            local lPart, _, lPos = GS.GetBestTargetInRadius(Config.LegitFOV, Config.LegitVisibleOnly)
-            if lPart and lPos then
-                local camPos = Camera.CFrame.Position
-                if (lPos - camPos).Magnitude > 0.5 then
-                    local goalCF = CFrame.lookAt(camPos, lPos)
-                    local alpha = math.clamp(1 / math.max(Config.LegitSmooth, 2), 0.04, 0.45)
-                    Camera.CFrame = Camera.CFrame:Lerp(goalCF, alpha)
-                end
-            end
-        end
-    end
-
-    -- 6. Авто-выстрел за Шерифа (AutoFire + AutoWallbang)
+    -- Авто-выстрел 360° за Шерифа (Стреляет мгновенно, даже если Мардер сзади или за стеной!)
     if Config.AutoFire and (tick() - LastAutoShoot) >= 0.45 then
         local gun = myChar:FindFirstChild("Gun")
         if gun and tPart and tPlr and tAimPos and (isVis or Config.Wallbang) then
             LastAutoShoot = tick()
             GS.DirectShootGunAt(tAimPos, tPlr, tPart)
-        end
-    end
-
-    -- 7. Легит Триггербот
-    if Config.LegitTriggerbot and (tick() - LastTriggerShot) >= (Config.TriggerbotDelay / 1000) then
-        local gun = myChar:FindFirstChild("Gun")
-        if gun and tPart and tPlr and isVis then
-            local sp, onScreen = Camera:WorldToViewportPoint(tPart.Position)
-            if onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude <= 38 then
-                LastTriggerShot = tick()
-                GS.DirectShootGunAt(tAimPos, tPlr, tPart)
-            end
         end
     end
 end))
