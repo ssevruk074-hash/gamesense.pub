@@ -1772,3 +1772,144 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 end))
+-------------------------------------------------------------------------
+-- АВТОНОМНЫЙ МОДУЛЬ: ANTI-FLING + TARGET FLING [KEY H] + КНОПКИ В МЕНЮ
+-------------------------------------------------------------------------
+do
+    local GS = _G.GS
+    if not GS then return end
+
+    local Players = GS.Players
+    local RunService = GS.RunService
+    local UserInputService = GS.UserInputService
+    local LocalPlayer = GS.LocalPlayer
+    local Config = GS.Config
+    local Skeet = GS.Skeet
+
+    if Config.AntiFling == nil then Config.AntiFling = true end
+    if Config.TargetFlingKey == nil then Config.TargetFlingKey = true end
+
+    -- 1. ДВИЖОК ANTI-FLING (Отключает физическое столкновение с чужими модельками и гасит импульс)
+    GS.TrackConnection(RunService.Stepped:Connect(function()
+        if GS.Unhooked or not Config.AntiFling then return end
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                for _, part in ipairs(plr.Character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if myRoot and (myRoot.AssemblyAngularVelocity.Magnitude > 50 or myRoot.AssemblyLinearVelocity.Magnitude > 250) then
+            myRoot.AssemblyAngularVelocity = Vector3.zero
+            myRoot.AssemblyLinearVelocity = Vector3.new(0, myRoot.AssemblyLinearVelocity.Y, 0)
+        end
+    end))
+
+    -- 2. ДВИЖОК TARGET FLING (Выкидывает за карту текущую цель из Silent Aim или Мардера)
+    local FlingRunning = false
+    function GS.TriggerTargetFling(customPlr)
+        if FlingRunning then return end
+        local targetPlr = customPlr or GS.CurrentTargetPlr or GS.FindByRole("Murderer")
+        if not targetPlr or not targetPlr.Character or not targetPlr.Character:FindFirstChild("HumanoidRootPart") then
+            GS.PushSkeetLog("Target Fling: Нет живой цели в прицеле!", Skeet.Danger)
+            return
+        end
+
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+
+        FlingRunning = true
+        local savedCF = myRoot.CFrame
+        local wasAntiFling = Config.AntiFling
+        Config.AntiFling = false -- Временно включаем коллизию, чтобы ударить цель
+
+        GS.PushSkeetLog("Target Fling: Запускаем " .. targetPlr.Name .. " в космос!", Skeet.Gold)
+
+        task.spawn(function()
+            local bav = Instance.new("BodyAngularVelocity")
+            bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            bav.P = math.huge
+            bav.AngularVelocity = Vector3.new(99999, 99999, 99999)
+            bav.Parent = myRoot
+
+            local startTick = tick()
+            while (tick() - startTick) < 1.15 and not GS.Unhooked do
+                local tChar = targetPlr.Character
+                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+                if not tRoot or tRoot.Velocity.Magnitude > 600 then break end
+
+                myRoot.CanCollide = true
+                local tVel = tRoot.AssemblyLinearVelocity
+                myRoot.CFrame = tRoot.CFrame + Vector3.new(tVel.X * 0.08, 0, tVel.Z * 0.08)
+                myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
+                RunService.RenderStepped:Wait()
+            end
+
+            if bav then bav:Destroy() end
+            if myRoot and myRoot.Parent then
+                myRoot.AssemblyLinearVelocity = Vector3.zero
+                myRoot.AssemblyAngularVelocity = Vector3.zero
+                myRoot.CFrame = savedCF
+            end
+            Config.AntiFling = wasAntiFling
+            FlingRunning = false
+            GS.PushSkeetLog("Target Fling завершён: " .. targetPlr.Name, Skeet.Accent)
+        end)
+    end
+
+    -- Быстрый бинд Target Fling на клавишу [H]
+    GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
+        if not gp and not GS.Unhooked and inp.KeyCode == Enum.KeyCode.H and Config.TargetFlingKey then
+            GS.TriggerTargetFling()
+        end
+    end))
+
+    -- 3. АВТО-ВСТРАИВАНИЕ КНОПОК ПРЯМО В ТВОЁ МЕНЮ (Вкладка Misc -> MM2 Special Utilities)
+    task.spawn(function()
+        task.wait(0.4)
+        if GS.Unhooked or not GS.OuterWindow then return end
+
+        for _, lbl in ipairs(GS.OuterWindow:GetDescendants()) do
+            if lbl:IsA("TextLabel") and string.find(lbl.Text, "MM2 Special Utilities") then
+                local boxFrame = lbl.Parent and lbl.Parent.Parent and lbl.Parent.Parent:FindFirstChildOfClass("Frame")
+                local content = boxFrame and boxFrame:FindFirstChildOfClass("Frame")
+                if content then
+                    -- Галочка Anti-Fling
+                    local row = Instance.new("TextButton", content)
+                    row.Size = UDim2.new(1, 0, 0, 16); row.BackgroundTransparency = 1; row.Text = ""; row.AutoButtonColor = false
+                    local box = Instance.new("Frame", row)
+                    box.Size = UDim2.new(0, 8, 0, 8); box.Position = UDim2.new(0, 0, 0.5, -4)
+                    box.BackgroundColor3 = Config.AntiFling and Skeet.Accent or Skeet.ControlBg
+                    box.BorderColor3 = Skeet.ControlBorder; box.BorderSizePixel = 1
+                    local textLbl = Instance.new("TextLabel", row)
+                    textLbl.Size = UDim2.new(1, -20, 1, 0); textLbl.Position = UDim2.new(0, 18, 0, 0); textLbl.BackgroundTransparency = 1
+                    textLbl.Font = Enum.Font.SourceSans; textLbl.TextSize = 13
+                    textLbl.TextColor3 = Config.AntiFling and Skeet.TextActive or Skeet.Text
+                    textLbl.TextXAlignment = Enum.TextXAlignment.Left; textLbl.Text = "Anti-Fling (Immunity to push)"
+                    GS.TrackConnection(row.MouseButton1Click:Connect(function()
+                        Config.AntiFling = not Config.AntiFling
+                        box.BackgroundColor3 = Config.AntiFling and Skeet.Accent or Skeet.ControlBg
+                        textLbl.TextColor3 = Config.AntiFling and Skeet.TextActive or Skeet.Text
+                    end))
+
+                    -- Кнопка Target Fling
+                    local btnWrap = Instance.new("Frame", content)
+                    btnWrap.Size = UDim2.new(1, 0, 0, 22); btnWrap.BackgroundTransparency = 1
+                    local btn = Instance.new("TextButton", btnWrap)
+                    btn.Size = UDim2.new(1, -36, 0, 20); btn.Position = UDim2.new(0, 18, 0, 1)
+                    btn.BackgroundColor3 = Skeet.ControlBg; btn.BorderColor3 = Skeet.ControlBorder; btn.BorderSizePixel = 1
+                    btn.Font = Enum.Font.SourceSansBold; btn.TextSize = 13; btn.TextColor3 = Skeet.Danger
+                    btn.Text = "TARGET FLING [Key H]"
+                    GS.TrackConnection(btn.MouseButton1Click:Connect(function()
+                        GS.TriggerTargetFling()
+                    end))
+                end
+            end
+        end
+    end)
+end
