@@ -1,4 +1,4 @@
--- File: visuals_ui.lua | Ultimate Forum Visuals Pack (Blissful 3D Box + Exunys HeadDot/Tracers + Skeet Crosshair Indicators + Velocity Graph)
+-- File: visuals_ui.lua | 1:1 Skeet.cc UI with Built-In Pro Movement, StatTrak Skins, Anti-Fling, Target Fling & Forum Visuals
 local GS = _G.GS
 if not GS then return end
 
@@ -15,26 +15,61 @@ local Config = GS.Config
 local Skeet = GS.Skeet
 local ScreenGui = GS.ScreenGui
 
--- Дополняем конфиг новыми визуальными функциями с форумов (чтобы всё работало сразу без правки core.lua)
-local ExtraVisualDefaults = {
-    ESP_BoxStyle = "Corner", -- Corner, Full 2D, 3D Box (12 Lines)
+-- Гарантируем наличие всех настроек Нового Мувмента, Скинов, Анти-Флинга и Визуалов
+local AllNewDefaults = {
+    -- New Movement
+    Fly_Enabled = false,
+    Fly_Speed = 55,
+    Dash_Enabled = true,
+    Dash_Power = 18,
+    Dash_Cooldown = 1,
+    ClickTP = true,
+    SpiderClimb = true,
+    SpiderSpeed = 26,
+    Moonwalk = false,
+    LowGravity = false,
+    GravityVal = 85,
+    AntiVoid = true,
+    TargetStrafe = false,
+    CircleRadius = 10,
+
+    -- Fling & Anti-Fling
+    AntiFling = true,
+    TargetFlingKey = true,
+
+    -- New Skins & StatTrak
+    SkinChanger = true,
+    GunSkinModel = "AWP Sniper",
+    GunSkinFinish = "Dragon Lore",
+    KnifeSkinModel = "Karambit",
+    KnifeSkinFinish = "Doppler Ruby",
+    StatTrakCounter = true,
+    StatTrakKills = 67,
+    WeaponBladeTrail = true,
+    WeaponSparkles = false,
+    KnifeInspectSpin = true,
+    CustomViewmodelOffset = false,
+    ViewmodelX = 0,
+    ViewmodelY = 0,
+    ViewmodelZ = 0,
+
+    -- Forum Visuals
+    ESP_BoxStyle = "Corner",
     ESP_HeadDot = true,
     ESP_LookLaser = true,
     ESP_Tracers = false,
-    ESP_TracerOrigin = "Bottom", -- Bottom, Center, Mouse
-    ESP_WeaponHeld = true, -- Показывает, держит ли враг нож/револьвер прямо сейчас в руках
-    SkeetIndicators = true, -- Индикаторы под прицелом (FAKE, DT, AA, DMG, WALL) как в CS:GO Skeet.cc
-    VelocityGraph = true, -- Спидометр и живой график скорости внизу экрана
-    SpectatorList = true, -- Окно списка игроков, которые следят за тобой или мертвы
-    OrbitSpheres = true, -- 3D вращающиеся неоновые сферы вокруг тебя
+    ESP_TracerOrigin = "Bottom",
+    SkeetIndicators = true,
+    VelocityGraph = true,
+    SpectatorList = true,
+    OrbitSpheres = true,
     OrbitCount = 3,
     OrbitSpeed = 4,
     OrbitRadius = 4,
-    ThirdPersonZeroClip = true, -- Камера от 3-го лица не приближается при упоре в стену
-    WorldBloom = false,
-    BloomIntensity = 40
+    WorldBloom = false
 }
-for k, v in pairs(ExtraVisualDefaults) do
+
+for k, v in pairs(AllNewDefaults) do
     if Config[k] == nil then Config[k] = v end
     if GS.DefaultConfigBackup and GS.DefaultConfigBackup[k] == nil then
         GS.DefaultConfigBackup[k] = v
@@ -45,6 +80,80 @@ local BloomEffect = GS.TrackInstance(Instance.new("BloomEffect"))
 BloomEffect.Name = "GS_Bloom"
 BloomEffect.Enabled = false
 BloomEffect.Parent = Lighting
+
+-------------------------------------------------------------------------
+-- ВСТРОЕННЫЙ ДВИЖОК ANTI-FLING И TARGET FLING [KEY H]
+-------------------------------------------------------------------------
+GS.TrackConnection(RunService.Stepped:Connect(function()
+    if GS.Unhooked or not Config.AntiFling then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            for _, part in ipairs(plr.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if myRoot and (myRoot.AssemblyAngularVelocity.Magnitude > 50 or myRoot.AssemblyLinearVelocity.Magnitude > 250) then
+        myRoot.AssemblyAngularVelocity = Vector3.zero
+        myRoot.AssemblyLinearVelocity = Vector3.new(0, myRoot.AssemblyLinearVelocity.Y, 0)
+    end
+end))
+
+local FlingRunning = false
+function GS.TriggerTargetFling(customPlr)
+    if FlingRunning then return end
+    local targetPlr = customPlr or GS.CurrentTargetPlr or GS.FindByRole("Murderer")
+    if not targetPlr or not targetPlr.Character or not targetPlr.Character:FindFirstChild("HumanoidRootPart") then
+        GS.PushSkeetLog("Target Fling: Нет живой цели!", Skeet.Danger)
+        return
+    end
+
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    FlingRunning = true
+    local savedCF = myRoot.CFrame
+    local wasAntiFling = Config.AntiFling
+    Config.AntiFling = false
+
+    GS.PushSkeetLog("Target Fling: Запускаем " .. targetPlr.Name .. " за карту!", Skeet.Gold)
+
+    task.spawn(function()
+        local bav = Instance.new("BodyAngularVelocity")
+        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bav.P = math.huge
+        bav.AngularVelocity = Vector3.new(99999, 99999, 99999)
+        bav.Parent = myRoot
+
+        local startTick = tick()
+        while (tick() - startTick) < 1.15 and not GS.Unhooked do
+            local tChar = targetPlr.Character
+            local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+            if not tRoot or tRoot.Velocity.Magnitude > 600 then break end
+
+            myRoot.CanCollide = true
+            local tVel = tRoot.AssemblyLinearVelocity
+            myRoot.CFrame = tRoot.CFrame + Vector3.new(tVel.X * 0.08, 0, tVel.Z * 0.08)
+            myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
+            RunService.RenderStepped:Wait()
+        end
+
+        if bav then bav:Destroy() end
+        if myRoot and myRoot.Parent then
+            myRoot.AssemblyLinearVelocity = Vector3.zero
+            myRoot.AssemblyAngularVelocity = Vector3.zero
+            myRoot.CFrame = savedCF
+        end
+        Config.AntiFling = wasAntiFling
+        FlingRunning = false
+        GS.PushSkeetLog("Target Fling завершён: " .. targetPlr.Name, Skeet.Accent)
+    end)
+end
 
 -------------------------------------------------------------------------
 -- КАСТОМНЫЙ ПРИЦЕЛ СКИТА, SKEET INDICATORS ПОД ПРИЦЕЛОМ И VELOCITY GRAPH
@@ -83,7 +192,6 @@ GradRight.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), N
 local ScopeDot = Instance.new("Frame", ScopeHolder)
 ScopeDot.BorderSizePixel = 0; ScopeDot.BackgroundColor3 = Skeet.Accent
 
--- SKEET CROSSHAIR INDICATORS (Под прицелом: FAKE, SILENT, WALLBANG, DT, FL)
 local SkeetIndHolder = Instance.new("Frame", ScreenGui)
 SkeetIndHolder.Size = UDim2.new(0, 160, 0, 120)
 SkeetIndHolder.BackgroundTransparency = 1
@@ -104,7 +212,6 @@ for i = 1, 6 do
     IndLabels[i] = lbl
 end
 
--- VELOCITY SPEEDOMETER & GRAPH (Внизу по центру экрана, как в CS:GO HvH)
 local VelHolder = Instance.new("Frame", ScreenGui)
 VelHolder.Size = UDim2.new(0, 180, 0, 65)
 VelHolder.Position = UDim2.new(0.5, -90, 0.84, 0)
@@ -134,7 +241,6 @@ for i = 1, 30 do
     VelGraphBars[i] = bar
 end
 
--- SPECTATOR & ROUND STATUS LIST (Справа под вотермаркой)
 local SpecBox = Instance.new("Frame", ScreenGui)
 SpecBox.Size = UDim2.new(0, 185, 0, 24)
 SpecBox.Position = UDim2.new(1, -197, 0, 42)
@@ -153,7 +259,6 @@ spBody.Font = Enum.Font.Code; spBody.TextSize = 11; spBody.TextColor3 = Skeet.Te
 spBody.TextXAlignment = Enum.TextXAlignment.Left; spBody.TextYAlignment = Enum.TextYAlignment.Top
 spBody.AutomaticSize = Enum.AutomaticSize.Y
 
--- 2D РАДАР И TARGET HUD
 local RadarFrame = Instance.new("Frame", ScreenGui)
 RadarFrame.Size = UDim2.new(0, 136, 0, 136)
 RadarFrame.Position = UDim2.new(0, 14, 0, 195)
@@ -207,9 +312,6 @@ thBarBg.BackgroundColor3 = Skeet.ControlBg; thBarBg.BorderColor3 = Skeet.Control
 local thBarFill = Instance.new("Frame", thBarBg)
 thBarFill.Size = UDim2.new(1, 0, 1, 0); thBarFill.BackgroundColor3 = Skeet.Accent; thBarFill.BorderSizePixel = 0
 
--------------------------------------------------------------------------
--- 3D ВРАЩАЮЩИЕСЯ ОРБИТАЛЬНЫЕ СФЕРЫ (ORBITING AURA BALLS)
--------------------------------------------------------------------------
 local OrbitFolder = GS.TrackInstance(Instance.new("Folder"))
 OrbitFolder.Name = "GS_OrbitSpheres"
 OrbitFolder.Parent = Workspace
@@ -225,15 +327,11 @@ for i = 1, 6 do
     ball.Transparency = 1
     ball.Parent = OrbitFolder
 
-    local att0 = Instance.new("Attachment", ball)
-    att0.Position = Vector3.new(0, 0.2, 0)
-    local att1 = Instance.new("Attachment", ball)
-    att1.Position = Vector3.new(0, -0.2, 0)
+    local att0 = Instance.new("Attachment", ball); att0.Position = Vector3.new(0, 0.2, 0)
+    local att1 = Instance.new("Attachment", ball); att1.Position = Vector3.new(0, -0.2, 0)
 
     local tr = Instance.new("Trail", ball)
-    tr.Attachment0 = att0
-    tr.Attachment1 = att1
-    tr.Lifetime = 0.35
+    tr.Attachment0 = att0; tr.Attachment1 = att1; tr.Lifetime = 0.35
     tr.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
     tr.Color = ColorSequence.new(Skeet.Accent)
     tr.Enabled = false
@@ -448,7 +546,7 @@ local function AddCheckbox(group, label, key, hasBindTag)
     GS.TrackConnection(Row.MouseButton1Click:Connect(function()
         Config[key] = not Config[key]
         sync()
-        if key == "SkinChanger" and not Config.SkinChanger then
+        if string.find(key, "Skin") or string.find(key, "StatTrak") or string.find(key, "Weapon") then
             GS.ClearCustomSkins()
         end
     end))
@@ -552,7 +650,7 @@ local function AddButton(group, label, callback, customTextColor)
 end
 
 -------------------------------------------------------------------------
--- СБОРКА ВСЕХ 8 ВКЛАДОК SKEET.CC
+-- СБОРКА ВСЕХ 8 ВКЛАДОК SKEET.CC (СО ВСЕМИ НОВЫМИ КНОПКАМИ ВНУТРИ!)
 -------------------------------------------------------------------------
 local R_L, R_R = CreateSkeetTab("Rage")
 local AA_L, AA_R = CreateSkeetTab("AntiAim")
@@ -620,14 +718,22 @@ AddCheckbox(gFL, "Smooth Fake lag (Network Sleep)", "FakeLag", true)
 AddSlider(gFL, "Fake lag limit", "FakeLagLimit", 1, 12, "t")
 AddCheckbox(gFL, "Infinite duck / Fake crouch", "FakeDuck", true)
 
--- ВКЛАДКА 3: СКИНЧЕНДЖЕР И LEGITBOT
-local gSkins = CreateGroupbox(LG_L, "1:1 CS:GO 3D Skinchanger")
+-- ВКЛАДКА 3: ПОЛНЫЙ 1:1 CS:GO СКИНЧЕНДЖЕР (С AK-47, M4A1-S, STATTRAK И ШЛЕЙФАМИ!) + LEGITBOT
+local gSkins = CreateGroupbox(LG_L, "1:1 CS:GO 3D Skinchanger (Pro)")
 AddCheckbox(gSkins, "Enable 1:1 CS:GO Skinchanger", "SkinChanger", false)
-AddDropdown(gSkins, "Gun model (Replaces Revolver)", "GunSkinModel", {"AWP Sniper", "SSG-08 Scout", "Desert Eagle"})
-AddDropdown(gSkins, "Gun skin finish", "GunSkinFinish", {"Dragon Lore", "Asiimov", "Fade", "Gungnir", "Printstream", "Redline"})
-AddDropdown(gSkins, "Knife model (Replaces Knife)", "KnifeSkinModel", {"Karambit", "Butterfly Knife", "M9 Bayonet"})
-AddDropdown(gSkins, "Knife skin finish", "KnifeSkinFinish", {"Doppler Ruby", "Sapphire", "Emerald", "Fade", "Case Hardened Blue Gem", "Lore"})
+AddDropdown(gSkins, "Gun model (Replaces Revolver)", "GunSkinModel", {"AWP Sniper", "AK-47 Kalash", "M4A1-S Silencer", "SSG-08 Scout", "Desert Eagle"})
+AddDropdown(gSkins, "Gun skin finish", "GunSkinFinish", {"Chroma Wave (Animated)", "Dragon Lore", "Asiimov", "Fade", "Gungnir", "Printstream", "Redline"})
+AddDropdown(gSkins, "Knife model (Replaces Knife)", "KnifeSkinModel", {"Karambit", "Butterfly Knife", "M9 Bayonet", "Talon Knife", "Skeleton Knife"})
+AddDropdown(gSkins, "Knife skin finish", "KnifeSkinFinish", {"Chroma Wave (Animated)", "Doppler Ruby", "Sapphire", "Emerald", "Fade", "Case Hardened Blue Gem", "Lore"})
+AddCheckbox(gSkins, "3D StatTrak™ LED Kill Counter", "StatTrakCounter", false)
+AddCheckbox(gSkins, "Neon Blade & Barrel Trail", "WeaponBladeTrail", false)
+AddCheckbox(gSkins, "Weapon Energy Sparkles", "WeaponSparkles", false)
+AddCheckbox(gSkins, "Inspect Spin Animation [Key F]", "KnifeInspectSpin", true)
 AddCheckbox(gSkins, "CS:GO AWP & Knife sounds", "CSGOSounds", false)
+AddCheckbox(gSkins, "Custom Viewmodel Offset (Hand Pos)", "CustomViewmodelOffset", false)
+AddSlider(gSkins, "Viewmodel X", "ViewmodelX", -25, 25, "")
+AddSlider(gSkins, "Viewmodel Y", "ViewmodelY", -25, 25, "")
+AddSlider(gSkins, "Viewmodel Z", "ViewmodelZ", -25, 25, "")
 AddButton(gSkins, "Rebuild 1:1 Skins Now", GS.ClearCustomSkins, Skeet.Accent)
 
 local gLegitAim = CreateGroupbox(LG_R, "Legit Aimbot, Trigger & Backtrack")
@@ -644,7 +750,7 @@ AddSlider(gLegitAim, "Backtrack window", "BacktrackMS", 50, 400, "ms")
 AddCheckbox(gLegitAim, "Legit Hitbox Expander", "HitboxExpander", false)
 AddSlider(gLegitAim, "Expanded hitbox size", "HitboxSize", 3, 20, "st")
 
--- ВКЛАДКА 4: ФОРУМНЫЕ ВИЗУАЛЫ (BLISSFUL 3D BOX + EXUNYS + SKEET INDICATORS)
+-- ВКЛАДКА 4: ФОРУМНЫЕ ВИЗУАЛЫ
 local gPlayerESP = CreateGroupbox(VS_L, "Player ESP (Forum Pack)")
 AddCheckbox(gPlayerESP, "Enabled", "ESP_Enabled", false)
 AddCheckbox(gPlayerESP, "Bounding box", "ESP_Box", false)
@@ -714,11 +820,24 @@ AddSlider(gWorldESP, "Aspect ratio width", "AspectRatioVal", 55, 100, "%")
 AddCheckbox(gWorldESP, "Fullbright", "Fullbright", false)
 AddCheckbox(gWorldESP, "Night mode", "NightMode", false)
 
--- ВКЛАДКА 5: ДВИЖЕНИЕ И MM2 УТИЛИТЫ
-local gMove = CreateGroupbox(MS_L, "Movement & Strafes")
+-- ВКЛАДКА 5: ПОЛНЫЙ PRO МУВМЕНТ (ВСЕ НОВЫЕ ФУНКЦИИ В МЕНЮ!) + ANTI-FLING & TARGET FLING
+local gMove = CreateGroupbox(MS_L, "Movement, Fly & Strafes (Pro)")
 AddCheckbox(gMove, "Enable Speed", "Speed_Enabled", true)
 AddDropdown(gMove, "Speed mode", "SpeedMode", {"WalkSpeed", "CFrame Bypass", "Velocity Impulse", "Pulse Boost"})
 AddSlider(gMove, "Speed factor", "SpeedVal", 16, 110, "")
+AddCheckbox(gMove, "Camera Fly Mode [Key V]", "Fly_Enabled", true)
+AddSlider(gMove, "Camera Fly Speed", "Fly_Speed", 20, 150, "")
+AddCheckbox(gMove, "Phase Dash Blink [Key Q]", "Dash_Enabled", true)
+AddSlider(gMove, "Phase Dash Distance", "Dash_Power", 8, 45, "st")
+AddCheckbox(gMove, "Ctrl + Click Teleport", "ClickTP", true)
+AddCheckbox(gMove, "Spider Wall-Climb (Climb Walls)", "SpiderClimb", false)
+AddSlider(gMove, "Spider Climb Speed", "SpiderSpeed", 15, 60, "")
+AddCheckbox(gMove, "Moonwalk (Slide Backwards)", "Moonwalk", false)
+AddCheckbox(gMove, "Target Orbit Strafe (Lock Orbit)", "TargetStrafe", true)
+AddSlider(gMove, "Orbit Strafe Radius", "CircleRadius", 5, 25, "st")
+AddCheckbox(gMove, "Low Moon Gravity", "LowGravity", false)
+AddSlider(gMove, "Gravity Power", "GravityVal", 30, 196, "")
+AddCheckbox(gMove, "Anti-Void (Save from falling)", "AntiVoid", false)
 AddCheckbox(gMove, "Bunny hop", "BHop", false)
 AddCheckbox(gMove, "Air autostrafe (WASD Directional)", "AirStrafe", false)
 AddSlider(gMove, "Air strafe velocity", "StrafeSpeed", 18, 90, "")
@@ -727,7 +846,16 @@ AddCheckbox(gMove, "Modify JumpPower", "HighJump", false)
 AddSlider(gMove, "Jump power", "JumpPower", 50, 160, "")
 AddCheckbox(gMove, "Noclip (Phase walls)", "Noclip", true)
 
-local gMM2Util = CreateGroupbox(MS_R, "MM2 Special Utilities")
+local gMM2Util = CreateGroupbox(MS_R, "Fling, Anti-Fling & MM2 Utils")
+AddCheckbox(gMM2Util, "Anti-Fling (Immunity to body push)", "AntiFling", false)
+AddCheckbox(gMM2Util, "Enable Target Fling Hotkey [Key H]", "TargetFlingKey", true)
+AddButton(gMM2Util, "TARGET FLING LOCKED ENEMY [Key H]", function()
+    GS.TriggerTargetFling()
+end, Skeet.Danger)
+AddButton(gMM2Util, "FLING MURDERER INTO VOID", function()
+    local m = GS.FindByRole("Murderer")
+    if m then GS.TriggerTargetFling(m) else GS.PushSkeetLog("Мардер не найден!", Skeet.Danger) end
+end, Skeet.Gold)
 AddCheckbox(gMM2Util, "Auto grab dropped gun", "AutoGrabGun", false)
 AddCheckbox(gMM2Util, "Coin magnet (Pull nearby coins)", "CoinMagnet", false)
 AddSlider(gMM2Util, "Coin magnet radius", "CoinMagnetDist", 8, 35, "st")
@@ -1049,11 +1177,10 @@ local BonePairsR6 = {
     {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
 }
 
--- 12 рёбер 3D-куба (Blissful4992 3D Box ESP)
 local CubeEdges = {
-    {1, 2}, {2, 3}, {3, 4}, {4, 1}, -- Верхняя грань
-    {5, 6}, {6, 7}, {7, 8}, {8, 5}, -- Нижняя грань
-    {1, 5}, {2, 6}, {3, 7}, {4, 8}  -- Вертикальные стойки
+    {1, 2}, {2, 3}, {3, 4}, {4, 1},
+    {5, 6}, {6, 7}, {7, 8}, {8, 5},
+    {1, 5}, {2, 6}, {3, 7}, {4, 8}
 }
 
 GS.TrackConnection(Players.PlayerRemoving:Connect(function(plr)
@@ -1077,6 +1204,8 @@ GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
             OuterWindow.Visible = not OuterWindow.Visible
         elseif inp.KeyCode == Enum.KeyCode.End then
             GS.FullUnhook()
+        elseif inp.KeyCode == Enum.KeyCode.H and Config.TargetFlingKey then
+            GS.TriggerTargetFling()
         elseif inp.KeyCode == Enum.KeyCode.G and Config.RemoteShootFromSheriff then
             GS.RemoteFireLivingSheriffGun(GS.CurrentAimPos)
         elseif inp.KeyCode == Enum.KeyCode.Space then
@@ -1119,7 +1248,7 @@ GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
 end))
 
 -------------------------------------------------------------------------
--- ГЛАВНЫЙ ЦИКЛ ОТРИСОВКИ ФОРУМНЫХ ВИЗУАЛОВ И ESP
+-- ГЛАВНЫЙ ЦИКЛ ОТРИСОВКИ ВИЗУАЛОВ И ESP
 -------------------------------------------------------------------------
 local LastXRayCheck = 0
 
@@ -1146,7 +1275,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         wmTxt.Text = string.format("gamesense | %s [%s]%s | %d fps", LocalPlayer.Name, GS.GetRole(LocalPlayer), desyncState, fps)
     end
 
-    -- 1. SKEET UNDER-CROSSHAIR INDICATORS (DT, FAKE, SILENT, WALL, AA)
     local scopeCenter = (Config.ScopeAlignMode == "Crosshair / Mouse") and mousePos or vpCenter
     SkeetIndHolder.Visible = Config.SkeetIndicators
     if Config.SkeetIndicators then
@@ -1162,14 +1290,14 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         if Config.Wallbang then
             table.insert(activeInds, {Text = "WALLBANG", Col = Skeet.Gold})
         end
-        if Config.DoubleTap then
-            table.insert(activeInds, {Text = "DT [READY]", Col = Skeet.Accent})
+        if Config.Fly_Enabled then
+            table.insert(activeInds, {Text = "FLY [ACTIVE]", Col = Skeet.Accent})
         end
         if Config.AA_Enabled then
             table.insert(activeInds, {Text = "AA: " .. string.upper(Config.AA_Yaw), Col = Skeet.Purple})
         end
-        if Config.FakeLag then
-            table.insert(activeInds, {Text = "FL: " .. tostring(Config.FakeLagLimit) .. "T", Col = Skeet.Cyan})
+        if Config.AntiFling then
+            table.insert(activeInds, {Text = "ANTI-FLING", Col = Skeet.Cyan})
         end
         for i = 1, 6 do
             local data = activeInds[i]
@@ -1183,7 +1311,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- 2. VELOCITY SPEEDOMETER & LIVE GRAPH
     if Config.VelocityGraph and myRoot then
         local speed = math.floor(Vector3.new(myRoot.AssemblyLinearVelocity.X, 0, myRoot.AssemblyLinearVelocity.Z).Magnitude)
         VelText.Text = tostring(speed) .. " u/s"
@@ -1197,7 +1324,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- 3. SPECTATOR / DEAD PLAYERS MONITOR
     if Config.SpectatorList then
         local deadOrSpec = {}
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1211,7 +1337,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         spBody.Text = #deadOrSpec > 0 and table.concat(deadOrSpec, "\n") or "None watching"
     end
 
-    -- 4. 3D ORBITING NEON SPHERES AROUND LOCALPLAYER
     for i = 1, 6 do
         local item = OrbitBalls[i]
         if Config.OrbitSpheres and myRoot and i <= Config.OrbitCount then
@@ -1237,14 +1362,11 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
             table.insert(list, "Silent aim       [" .. string.sub(tName, 1, 7) .. "]")
         end
         if Config.Wallbang then table.insert(list, "Wallbang         [on]") end
-        if Config.LegitAim then table.insert(list, "Legit aimbot     [on]") end
+        if Config.Fly_Enabled then table.insert(list, "Camera Fly [V]   [on]") end
+        if Config.Dash_Enabled then table.insert(list, "Phase Dash [Q]   [ready]") end
+        if Config.TargetFlingKey then table.insert(list, "Target Fling [H] [ready]") end
         if Config.Desync_Enabled then table.insert(list, "Anti-Silent      [" .. Config.Desync_Side .. "]") end
-        if Config.AA_Enabled then
-            local dirStr = (GS.ManualDir == -90 and "LEFT") or (GS.ManualDir == 90 and "RIGHT") or (GS.ManualDir == 180 and "BACK") or Config.AA_Yaw
-            table.insert(list, "Anti-aim         [" .. dirStr .. "]")
-        end
         if Config.Speed_Enabled then table.insert(list, "Speed (" .. Config.SpeedMode .. ")") end
-        if Config.KillAll then table.insert(list, "Kill all         [on]") end
         kbBody.Text = #list > 0 and table.concat(list, "\n") or "No active binds"
     end
 
@@ -1282,7 +1404,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         ArrowDown.TextColor3 = (GS.ManualDir == 180) and Skeet.Accent or Skeet.TextDim
     end
 
-    -- Custom Scope Update
     ScopeHolder.Visible = Config.CustomScope
     if Config.CustomScope then
         local scopeCol = GS.GetThemeColor(Config.ScopeColorMode)
@@ -1336,9 +1457,7 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
     end
 
     BloomEffect.Enabled = Config.WorldBloom
-    BloomEffect.Intensity = 0.8
-    BloomEffect.Size = 24
-    BloomEffect.Threshold = 0.85
+    BloomEffect.Intensity = 0.8; BloomEffect.Size = 24; BloomEffect.Threshold = 0.85
 
     GS.ColorGrade.Saturation = Config.ColorSaturation / 100
     if Config.WorldAmbience then
@@ -1465,7 +1584,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- ПОЛНЫЙ ПАК ФОРУМНОГО ESP (3D КУБЫ, CORNER БОКСЫ, HEAD DOT, LOOK LASER, TRACERS, SKELETON)
     local tracerStart = (Config.ESP_TracerOrigin == "Bottom" and Vector2.new(vpCenter.X, vpSize.Y - 10))
         or (Config.ESP_TracerOrigin == "Center" and vpCenter)
         or mousePos
@@ -1601,10 +1719,7 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                             for eIdx, edge in ipairs(CubeEdges) do
                                 local ln = esp.CubeLines[eIdx]
                                 if allVis then
-                                    ln.Visible = true
-                                    ln.From = verts2D[edge[1]]
-                                    ln.To = verts2D[edge[2]]
-                                    ln.Color = col
+                                    ln.Visible = true; ln.From = verts2D[edge[1]]; ln.To = verts2D[edge[2]]; ln.Color = col
                                 else
                                     ln.Visible = false
                                 end
@@ -1650,7 +1765,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                         esp.Flag.Text = string.upper(role) .. heldStr .. (Config.ESP_Distance and string.format(" · %dM", d) or "")
                         esp.Flag.Color = col
 
-                        -- Head Dot & 3D Look Laser
                         local pHead = char:FindFirstChild("Head")
                         if pHead and (Config.ESP_HeadDot or Config.ESP_LookLaser) then
                             local hp2D, hVis = Camera:WorldToViewportPoint(pHead.Position)
@@ -1674,20 +1788,14 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
                                     esp.LookLaser.Visible = false
                                 end
                             else
-                                esp.HeadDot.Visible = false
-                                esp.LookLaser.Visible = false
+                                esp.HeadDot.Visible = false; esp.LookLaser.Visible = false
                             end
                         else
-                            esp.HeadDot.Visible = false
-                            esp.LookLaser.Visible = false
+                            esp.HeadDot.Visible = false; esp.LookLaser.Visible = false
                         end
 
-                        -- Snapline Tracer to Enemy
                         if Config.ESP_Tracers then
-                            esp.Tracer.Visible = true
-                            esp.Tracer.From = tracerStart
-                            esp.Tracer.To = Vector2.new(pos.X, y + h)
-                            esp.Tracer.Color = col
+                            esp.Tracer.Visible = true; esp.Tracer.From = tracerStart; esp.Tracer.To = Vector2.new(pos.X, y + h); esp.Tracer.Color = col
                         else
                             esp.Tracer.Visible = false
                         end
@@ -1756,7 +1864,6 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- 3D Clone Ghost Update
     if myChar and myRoot then
         local showGhost = Config.Desync_Enabled and Config.Desync_ShowGhost
         local deltaCF = myRoot.CFrame:Inverse() * GS.ServerGhostCFrame
@@ -1772,144 +1879,3 @@ GS.TrackConnection(RunService.RenderStepped:Connect(function(dt)
         end
     end
 end))
--------------------------------------------------------------------------
--- АВТОНОМНЫЙ МОДУЛЬ: ANTI-FLING + TARGET FLING [KEY H] + КНОПКИ В МЕНЮ
--------------------------------------------------------------------------
-do
-    local GS = _G.GS
-    if not GS then return end
-
-    local Players = GS.Players
-    local RunService = GS.RunService
-    local UserInputService = GS.UserInputService
-    local LocalPlayer = GS.LocalPlayer
-    local Config = GS.Config
-    local Skeet = GS.Skeet
-
-    if Config.AntiFling == nil then Config.AntiFling = true end
-    if Config.TargetFlingKey == nil then Config.TargetFlingKey = true end
-
-    -- 1. ДВИЖОК ANTI-FLING (Отключает физическое столкновение с чужими модельками и гасит импульс)
-    GS.TrackConnection(RunService.Stepped:Connect(function()
-        if GS.Unhooked or not Config.AntiFling then return end
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LocalPlayer and plr.Character then
-                for _, part in ipairs(plr.Character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.CanCollide then
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if myRoot and (myRoot.AssemblyAngularVelocity.Magnitude > 50 or myRoot.AssemblyLinearVelocity.Magnitude > 250) then
-            myRoot.AssemblyAngularVelocity = Vector3.zero
-            myRoot.AssemblyLinearVelocity = Vector3.new(0, myRoot.AssemblyLinearVelocity.Y, 0)
-        end
-    end))
-
-    -- 2. ДВИЖОК TARGET FLING (Выкидывает за карту текущую цель из Silent Aim или Мардера)
-    local FlingRunning = false
-    function GS.TriggerTargetFling(customPlr)
-        if FlingRunning then return end
-        local targetPlr = customPlr or GS.CurrentTargetPlr or GS.FindByRole("Murderer")
-        if not targetPlr or not targetPlr.Character or not targetPlr.Character:FindFirstChild("HumanoidRootPart") then
-            GS.PushSkeetLog("Target Fling: Нет живой цели в прицеле!", Skeet.Danger)
-            return
-        end
-
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if not myRoot then return end
-
-        FlingRunning = true
-        local savedCF = myRoot.CFrame
-        local wasAntiFling = Config.AntiFling
-        Config.AntiFling = false -- Временно включаем коллизию, чтобы ударить цель
-
-        GS.PushSkeetLog("Target Fling: Запускаем " .. targetPlr.Name .. " в космос!", Skeet.Gold)
-
-        task.spawn(function()
-            local bav = Instance.new("BodyAngularVelocity")
-            bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-            bav.P = math.huge
-            bav.AngularVelocity = Vector3.new(99999, 99999, 99999)
-            bav.Parent = myRoot
-
-            local startTick = tick()
-            while (tick() - startTick) < 1.15 and not GS.Unhooked do
-                local tChar = targetPlr.Character
-                local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
-                if not tRoot or tRoot.Velocity.Magnitude > 600 then break end
-
-                myRoot.CanCollide = true
-                local tVel = tRoot.AssemblyLinearVelocity
-                myRoot.CFrame = tRoot.CFrame + Vector3.new(tVel.X * 0.08, 0, tVel.Z * 0.08)
-                myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
-                RunService.RenderStepped:Wait()
-            end
-
-            if bav then bav:Destroy() end
-            if myRoot and myRoot.Parent then
-                myRoot.AssemblyLinearVelocity = Vector3.zero
-                myRoot.AssemblyAngularVelocity = Vector3.zero
-                myRoot.CFrame = savedCF
-            end
-            Config.AntiFling = wasAntiFling
-            FlingRunning = false
-            GS.PushSkeetLog("Target Fling завершён: " .. targetPlr.Name, Skeet.Accent)
-        end)
-    end
-
-    -- Быстрый бинд Target Fling на клавишу [H]
-    GS.TrackConnection(UserInputService.InputBegan:Connect(function(inp, gp)
-        if not gp and not GS.Unhooked and inp.KeyCode == Enum.KeyCode.H and Config.TargetFlingKey then
-            GS.TriggerTargetFling()
-        end
-    end))
-
-    -- 3. АВТО-ВСТРАИВАНИЕ КНОПОК ПРЯМО В ТВОЁ МЕНЮ (Вкладка Misc -> MM2 Special Utilities)
-    task.spawn(function()
-        task.wait(0.4)
-        if GS.Unhooked or not GS.OuterWindow then return end
-
-        for _, lbl in ipairs(GS.OuterWindow:GetDescendants()) do
-            if lbl:IsA("TextLabel") and string.find(lbl.Text, "MM2 Special Utilities") then
-                local boxFrame = lbl.Parent and lbl.Parent.Parent and lbl.Parent.Parent:FindFirstChildOfClass("Frame")
-                local content = boxFrame and boxFrame:FindFirstChildOfClass("Frame")
-                if content then
-                    -- Галочка Anti-Fling
-                    local row = Instance.new("TextButton", content)
-                    row.Size = UDim2.new(1, 0, 0, 16); row.BackgroundTransparency = 1; row.Text = ""; row.AutoButtonColor = false
-                    local box = Instance.new("Frame", row)
-                    box.Size = UDim2.new(0, 8, 0, 8); box.Position = UDim2.new(0, 0, 0.5, -4)
-                    box.BackgroundColor3 = Config.AntiFling and Skeet.Accent or Skeet.ControlBg
-                    box.BorderColor3 = Skeet.ControlBorder; box.BorderSizePixel = 1
-                    local textLbl = Instance.new("TextLabel", row)
-                    textLbl.Size = UDim2.new(1, -20, 1, 0); textLbl.Position = UDim2.new(0, 18, 0, 0); textLbl.BackgroundTransparency = 1
-                    textLbl.Font = Enum.Font.SourceSans; textLbl.TextSize = 13
-                    textLbl.TextColor3 = Config.AntiFling and Skeet.TextActive or Skeet.Text
-                    textLbl.TextXAlignment = Enum.TextXAlignment.Left; textLbl.Text = "Anti-Fling (Immunity to push)"
-                    GS.TrackConnection(row.MouseButton1Click:Connect(function()
-                        Config.AntiFling = not Config.AntiFling
-                        box.BackgroundColor3 = Config.AntiFling and Skeet.Accent or Skeet.ControlBg
-                        textLbl.TextColor3 = Config.AntiFling and Skeet.TextActive or Skeet.Text
-                    end))
-
-                    -- Кнопка Target Fling
-                    local btnWrap = Instance.new("Frame", content)
-                    btnWrap.Size = UDim2.new(1, 0, 0, 22); btnWrap.BackgroundTransparency = 1
-                    local btn = Instance.new("TextButton", btnWrap)
-                    btn.Size = UDim2.new(1, -36, 0, 20); btn.Position = UDim2.new(0, 18, 0, 1)
-                    btn.BackgroundColor3 = Skeet.ControlBg; btn.BorderColor3 = Skeet.ControlBorder; btn.BorderSizePixel = 1
-                    btn.Font = Enum.Font.SourceSansBold; btn.TextSize = 13; btn.TextColor3 = Skeet.Danger
-                    btn.Text = "TARGET FLING [Key H]"
-                    GS.TrackConnection(btn.MouseButton1Click:Connect(function()
-                        GS.TriggerTargetFling()
-                    end))
-                end
-            end
-        end
-    end)
-end
